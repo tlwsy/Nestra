@@ -1,0 +1,218 @@
+# Nestra 配置模板
+# 复制为 config.yaml 后修改。本文件不含任何机密——
+# API key、主密钥一律走环境变量（见 .env.example）。
+# 逐项说明见 docs/08-config-reference.md
+
+app:
+  timezone: Asia/Shanghai
+  log_level: INFO
+  log_format: json            # json | console
+
+runtime:
+  web_workers: 1
+  crawl_concurrency: 4
+  playwright_concurrency: 1
+  sqlite_cache_mb: 32
+
+web:
+  host: 127.0.0.1             # 本地安全默认；Compose 会在容器内覆盖为 0.0.0.0
+  port: 8080
+  base_url: https://nestra.example.com    # 生成绝对链接用
+  cookie_secure: true         # 无 TLS 时必须改 false，且不应暴露公网
+  session_days: 14
+  # 官方 Compose/宿主反代来源；自定义网络时改成反代的精确地址/CIDR。
+  trusted_proxies: ["127.0.0.1/32", "172.16.0.0/12"]
+
+storage:
+  db_path: data/db/nestra.db
+  attachment_dir: data/attachments
+
+# ---------------------------------------------------------------
+# 标签集分组：每组独立生成、独立冻结、互不影响
+# 只有一个组时，行为与无分组完全一致
+# 新增异构主题的站点时才需加组，已冻结的组不受任何影响
+# ---------------------------------------------------------------
+tagset_groups:
+  - slug: campus
+    name: 校园教务
+    description: 高校教务、教学管理、学籍与考试相关通知
+    build_mode: llm              # llm | embedding
+    min_docs_for_build: 200
+    require_manual_review: false
+
+  # 主题差异大的站点另开一组，否则会被硬套进教务语义
+  # - slug: tech
+  #   name: 技术
+  #   description: 开源项目、工程实践、技术发布
+  #   build_mode: llm
+  #   min_docs_for_build: 200
+  #   require_manual_review: false
+
+# ---------------------------------------------------------------
+# 站点：加一个站点就是加一个条目，不需要改代码
+# 推荐用 Web 向导（/admin/sites/new）自动探测生成本段配置
+# 命令行等效入口：scripts/probe_site.py <url> --format yaml
+# ---------------------------------------------------------------
+sites:
+  # 首站已实测：服务端渲染，无 RSS/sitemap，不需要 Playwright。
+  # 详见 docs/10-site-probe-ujs-jwc.md。
+  - slug: ujs-jwc
+    name: 江苏大学教务处
+    base_url: https://jwc.ujs.edu.cn
+    enabled: true
+    tagset_group: campus           # 必填，指向 tagset_groups 中的 slug
+    crawl_interval_sec: 1800
+    render_js: false
+
+    discovery_mode: html_list
+    config:
+      list_urls:
+        - https://jwc.ujs.edu.cn/index/tzgg.htm
+      item_selector: 'li[id^="line_"]'
+      url_allow_pattern: '^https://jwc\.ujs\.edu\.cn/(info/\d+/\d+\.htm|content\.jsp)'
+      fields:
+        url: 'a.title.tt1@href'
+        title: 'a.title.tt1@title'    # 文本会截断，title 属性才是完整标题
+        published_at: 'p.date'
+      date_format: '%Y-%m-%d'
+      pagination:
+        mode: url_template
+        template: 'https://jwc.ujs.edu.cn/index/tzgg/{page}.htm'
+        order: desc_index             # 页号越小越旧
+        max_page: 78
+        max_pages: 1                  # 增量默认只看入口页
+
+    url_canonical:
+      rules:
+        - match: 'content\.jsp'
+          extract_params: [wbtreeid, wbnewsid]
+          rewrite: '/info/{wbtreeid}/{wbnewsid}.htm'
+      strip_params: [urltype]
+
+    extract:
+      min_content_length: 100
+      selectors:
+        title: 'h1.title'
+        content: 'div.v_news_content'
+        published_at_regex: '发布时间：\s*([\d-]+)'
+      reject_title_patterns: ['^系统提示$']
+      reject_content_patterns: ['无权访问', '仅允许江苏大学校内用户访问']
+
+    attachments:
+      enabled: true
+      link_patterns:
+        - 'download\.jsp|DownloadAttachUrl'
+        - '\.(pdf|docx?|xlsx?|pptx?|zip|rar)(\?|$)'
+      inline_image_patterns:
+        - '/__local/'
+      send_referer: true
+
+    politeness:
+      max_concurrency: 2
+      delay_sec: 2
+      conditional_requests: true
+
+politeness:
+  respect_robots: true
+  user_agent: 'Nestra/1.0 (+https://nestra.example.com/)'
+  delay_sec: 2
+  max_concurrency: 4
+  timeout_sec: 20
+  retry:
+    max_attempts: 3
+    backoff_base_sec: 5
+    retry_on: [429, 500, 502, 503, 504, timeout, connreset]
+
+attachments:
+  enabled: true
+  allow_mime:
+    - 'image/*'
+    - 'application/pdf'
+    - 'application/zip'
+    - 'application/vnd.openxmlformats-officedocument.*'
+    - 'application/x-ole-storage'
+  max_size_mb: 20
+  max_per_article: 10
+  total_quota_gb: 5
+
+# ---------------------------------------------------------------
+# 打标：LLM 链（按顺序尝试）→ 全部失败则本地 ONNX 兜底
+# ---------------------------------------------------------------
+tagger:
+  strategy: llm_chain_with_local_fallback
+  tagset_dir: data/models/tagsets     # 布局：{tagset_dir}/{group_slug}/tags.json
+  max_tags_per_article: 5
+  min_confidence_to_store: 0.3
+
+  llm:
+    request_timeout_sec: 30
+    max_retries_per_model: 2
+    backoff_base_sec: 2
+
+    # 顺序即优先级：provider 外层遍历，其 models 内层遍历
+    providers:
+      - name: deepseek
+        type: openai_compatible
+        base_url: https://api.deepseek.com/v1
+        api_key_env: DEEPSEEK_API_KEY
+        models: [deepseek-chat]
+        max_input_chars: 8000
+
+      - name: gemini
+        type: gemini
+        api_key_env: GEMINI_API_KEY
+        models: [gemini-2.0-flash, gemini-2.0-flash-lite]
+        max_input_chars: 12000
+
+      - name: openrouter
+        type: openai_compatible
+        base_url: https://openrouter.ai/api/v1
+        api_key_env: OPENROUTER_API_KEY
+        models: [meta-llama/llama-3.3-70b-instruct]
+        max_input_chars: 8000
+
+    circuit_breaker:
+      failure_threshold: 5
+      cooldown_sec: 600
+      half_open_probe: true
+
+  local:
+    # 默认关闭：ONNX 是可选依赖（uv sync --extra local），且常驻约 120MB
+    enabled: false
+    model_path: data/models/bge-small-zh-v1.5-int8.onnx
+    tokenizer_path: data/models/bge-small-zh-v1.5-tokenizer.json
+    idle_unload_after_sec: 900
+    intra_op_num_threads: 1
+    top_k: 5
+
+notify:
+  body_format: markdown
+  include_full_content: true
+  max_body_chars: 8000            # 可被渠道能力表下调
+  attachment_mode: both           # apprise | link | both
+  attachment_inline_max_mb: 10    # 超过则转链接
+  signed_link_ttl_hours: 72
+  dedupe_window_days: 7
+  retry:
+    max_attempts: 5
+    backoff_base_sec: 30
+  target_auto_disable_after_failures: 10
+
+schedule:
+  crawl_default_interval_sec: 1800
+  tag_interval_sec: 300
+  dispatch_interval_sec: 120
+  retry_delivery_interval_sec: 600
+  housekeeping_cron: '0 4 * * *'
+
+retention:
+  article_days: 180             # 超期清 content_html，保留元数据与标签
+  attachment_days: 30
+  audit_days: 90
+  session_cleanup: true
+
+alerts:                          # 系统级告警复用 Apprise 发给 admin
+  enabled: true
+  on_all_providers_down: true
+  on_disk_usage_pct: 85
+  on_site_consecutive_failures: 5

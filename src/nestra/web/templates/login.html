@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% set title = "Log in" %}
+{% block content %}
+<h1>Log in</h1>
+<form method="post" action="/login">
+  <input type="hidden" name="_csrf" value="{{ csrf }}">
+  <label>Username <input name="username" required autocomplete="username"></label>
+  <label>Password <input type="password" name="password" required autocomplete="current-password"></label>
+  <label>2FA code <input name="totp" inputmode="numeric" autocomplete="one-time-code"></label>
+  <label><input type="checkbox" name="remember_me"> Remember me</label>
+  <button>Log in</button>
+</form>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% set title = article.title or "Article" %}
+{% block content %}
+<article>
+  <h1>{{ article.title }}</h1>
+  <p>{{ article.site }} · {{ article.published_at or "" }}</p>
+  <div class="article-body">{{ article.content_html | safe }}</div>
+  {% if article.attachments %}
+  <h2>附件</h2>
+  <ul>
+    {% for attachment in article.attachments %}
+    <li><a href="/attachments/{{ attachment.id }}">{{ attachment.filename or "attachment" }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</article>
+{% endblock %}

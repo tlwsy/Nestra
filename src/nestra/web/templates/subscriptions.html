@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% set title = "Subscriptions" %}
+{% macro subscription_form(subscription=none) %}
+{% set item = subscription or {} %}
+<form method="post" action="{{ '/subscriptions/' ~ item.id if subscription else '/subscriptions' }}" class="stack">
+  <input type="hidden" name="_csrf" value="{{ csrf }}">
+  <label>Name <input name="name" value="{{ item.name or '' }}" required maxlength="100"></label>
+  <div class="form-grid">
+    <label>Match tags
+      <select name="match_mode">
+        <option value="any"{% if item.match_mode != 'all' %} selected{% endif %}>Any selected tag</option>
+        <option value="all"{% if item.match_mode == 'all' %} selected{% endif %}>All selected tags</option>
+      </select>
+    </label>
+    <label>Minimum confidence
+      <input type="number" name="min_confidence" value="{{ item.min_confidence if subscription else 0.5 }}" min="0" max="1" step="0.05" required>
+    </label>
+    <label>Quiet hours
+      <input name="quiet_hours" value="{{ item.quiet_hours or '' }}" placeholder="23:00-07:00" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]-([01]?[0-9]|2[0-3]):[0-5][0-9]">
+    </label>
+  </div>
+  <fieldset><legend>Tags</legend><div class="options">
+    {% for tag in tags %}<label><input type="checkbox" name="tag_ids" value="{{ tag.id }}"{% if tag.id in (item.tag_ids or []) %} checked{% endif %}> {{ tag.name }}</label>{% else %}<span>No tags available.</span>{% endfor %}
+  </div></fieldset>
+  <fieldset><legend>Sites <small>(none means all sites)</small></legend><div class="options">
+    {% for site in sites %}<label><input type="checkbox" name="site_ids" value="{{ site.id }}"{% if site.id in (item.site_ids or []) %} checked{% endif %}> {{ site.name }}</label>{% else %}<span>No sites available.</span>{% endfor %}
+  </div></fieldset>
+  <fieldset><legend>Notification targets</legend><div class="options">
+    {% for target in targets %}<label><input type="checkbox" name="target_ids" value="{{ target.id }}"{% if target.id in (item.target_ids or []) %} checked{% endif %}> {{ target.name }}</label>{% else %}<span>No targets available. <a href="/targets">Create one</a>.</span>{% endfor %}
+  </div></fieldset>
+  <div class="options">
+    <input type="hidden" name="include_attachments" value="0"><label><input type="checkbox" name="include_attachments" value="1"{% if not subscription or item.include_attachments %} checked{% endif %}> Include attachments</label>
+    <input type="hidden" name="enabled" value="0"><label><input type="checkbox" name="enabled" value="1"{% if not subscription or item.enabled %} checked{% endif %}> Enabled</label>
+  </div>
+  <button>{{ "Save subscription" if subscription else "Create subscription" }}</button>
+</form>
+{% endmacro %}
+{% block content %}
+<h1>Subscriptions</h1>
+<section class="card" aria-labelledby="new-subscription"><h2 id="new-subscription">New subscription</h2>{{ subscription_form() }}</section>
+<h2>Your subscriptions</h2>
+{% for subscription in subscriptions %}
+<section class="card" aria-labelledby="subscription-{{ subscription.id }}">
+  <h3 id="subscription-{{ subscription.id }}">{{ subscription.name }}</h3>
+  {{ subscription_form(subscription) }}
+  <form method="post" action="/subscriptions/{{ subscription.id }}/delete" class="actions">
+    <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="danger">Delete subscription</button>
+  </form>
+</section>
+{% else %}<p>No subscriptions yet.</p>{% endfor %}
+{% endblock %}

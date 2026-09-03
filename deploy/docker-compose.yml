@@ -1,0 +1,50 @@
+services:
+  nestra:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: ${NESTRA_IMAGE_TARGET:-runtime}
+      args:
+        NESTRA_UID: ${NESTRA_UID:-1000}
+        NESTRA_GID: ${NESTRA_GID:-1000}
+    image: nestra:local
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      NESTRA_CONFIG: /app/config/config.yaml
+      # 容器内监听固定，避免 YAML 改端口后与映射/healthcheck 脱节。
+      # 宿主暴露端口仍只绑定 127.0.0.1。
+      NESTRA__WEB__HOST: 0.0.0.0
+      NESTRA__WEB__PORT: "8080"
+      PYTHONUNBUFFERED: "1"
+    ports:
+      # 只暴露给宿主回环；公网入口必须由 Nginx/Caddy + TLS 提供。
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ../data:/app/data
+      - ../config/config.yaml:/app/config/config.yaml:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: 1400m
+    pids_limit: 256
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

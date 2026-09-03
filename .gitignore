@@ -1,0 +1,29 @@
+# 机密
+.env
+config/config.yaml
+
+# 运行时数据
+data/db/*
+data/attachments/*
+data/models/*
+!data/**/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 工具
+.DS_Store
+*.swp
+.idea/
+.vscode/

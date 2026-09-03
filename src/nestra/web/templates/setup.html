@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% set title = "Initial setup" %}
+{% block content %}
+<h1>Create the first administrator</h1>
+<form method="post" action="/setup">
+  <input type="hidden" name="_csrf" value="{{ csrf }}">
+  <input type="hidden" name="token" value="{{ setup_token }}">
+  <label>Username <input name="username" required pattern="[a-z0-9_.-]{1,64}" autocomplete="username"></label>
+  <label>Password <input type="password" name="password" required minlength="12" maxlength="1024" autocomplete="new-password"></label>
+  <button>Create administrator</button>
+</form>
+{% endblock %}

@@ -1,0 +1,102 @@
+[project]
+name = "nestra"
+version = "1.0.0"
+description = "自动抓取、打标、按订阅推送文章与附件"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.12.4",
+    "pydantic-settings>=2.13.1",
+    "pyyaml>=6.0.3",
+    "structlog>=25.5.0",
+    "fastapi>=0.121.3",
+    "uvicorn[standard]>=0.40.0",
+    "httpx>=0.28.1",
+    # core.crypto 被配置、订阅与调度层共用，不能放在 web extra 后面
+    "cryptography>=46.0.3",
+    "argon2-cffi>=25.1.0",
+]
+
+[project.optional-dependencies]
+crawl = [
+    "selectolax>=0.3.34",
+    "trafilatura>=2.0.0",
+    "feedparser>=6.0.12",
+    "defusedxml>=0.7.1",
+    "nh3>=0.3.2",
+]
+web = [
+    "jinja2>=3.1.6",
+    "nh3>=0.3.2",
+]
+notify = [
+    "apprise>=1.9.6",
+    "apscheduler>=3.11.0",
+]
+render = [
+    "playwright>=1.62.0",
+]
+local = [
+    "onnxruntime>=1.24.1",
+    "tokenizers>=0.23.1",
+]
+bootstrap = [
+    "torch>=2.2",
+    "sentence-transformers>=3.0",
+    "hdbscan>=0.8.40",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "respx>=0.23.1",
+    "ruff>=0.15.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nestra"]
+
+[project.scripts]
+nestra = "nestra.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "S", "C4", "SIM", "RUF"]
+# RUF001-003 把中文标点当作易混淆字符；本项目中文注释/错误信息是有意的。
+# N818 要求异常名均以 Error 结尾，但 Retryable/Fatal 是调度器使用的标记类，
+# 领域异常名也已在设计文档中固定，统一豁免。
+ignore = ["S101", "RUF001", "RUF002", "RUF003", "N818"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["error::DeprecationWarning"]
+markers = [
+    "unit: 不碰网络与外部进程的单元测试",
+    "integration: 跨模块集成测试（仍使用本地 fixture，不访问外网）",
+    "network: 真实访问外网，默认不跑（-m network 显式开启）",
+]
+addopts = "-m 'not network' --strict-markers"
+
+[tool.uv]
+default-groups = ["dev"]

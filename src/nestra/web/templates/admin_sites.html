@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% set title = "Sites" %}
+{% block content %}
+<h1>{{ "Add site" if onboarding else "Sites" }}</h1>
+<nav aria-label="Admin"><a href="/admin/users">Users</a> · <a href="/admin/tagset">Tagsets</a> · <a href="/admin/providers">Providers</a> · <a href="/admin/system">System</a> · <a href="/admin/audit">Audit</a></nav>
+{% if onboarding %}
+<p>Onboarding is confirmation-based; the final site is created disabled.</p>
+<ol><li>Probe</li><li>Choose or edit selectors</li><li>Dry-run</li><li>Inspect preview</li><li>Confirm</li></ol>
+<h2>Start probe</h2>
+<form method="post" action="/admin/sites/probe"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>Public URL <input type="url" name="url" required></label><button>Probe</button></form>
+<details><summary>Manual JSON fallback</summary>
+<form method="post" action="/admin/sites/dryrun"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>Candidate JSON <textarea name="candidate" required rows="14"></textarea></label><label>Tagset group <select name="tagset_group" required>{% for group in groups %}<option value="{{ group.slug }}">{{ group.name }}</option>{% endfor %}</select></label><button>Dry-run</button></form>
+</details>
+<p>Complex sites may instead use <code>nestra site sync</code> with YAML.</p>
+{% else %}
+<p><a href="/admin/sites/new">Add a site</a></p>
+{% for row in rows %}<section><h2>{{ row.name }}</h2><p><code>{{ row.slug }}</code> · {{ row.discovery_mode }} · {{ row.tagset_group }} · {{ "enabled" if row.enabled else "disabled" }}</p><p>{{ row.base_url }}</p>{% if row.last_error %}<p>Last crawl failed.</p>{% endif %}
+<form method="post" action="/admin/sites/{{ row.id }}/status"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="enabled" value="{{ 0 if row.enabled else 1 }}"><button>{{ "Disable" if row.enabled else "Enable" }}</button></form>
+{% if row.enabled %}<form method="post" action="/admin/sites/{{ row.id }}/crawl"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>Crawl now</button></form>{% endif %}</section>{% else %}<p>No sites.</p>{% endfor %}
+{% endif %}
+{% endblock %}

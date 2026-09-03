@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% set title = "Enable 2FA" %}
+{% block content %}
+<h1>Enable two-factor authentication</h1>
+<p>Add this account to your authenticator app, then enter its six-digit code within 10 minutes.</p>
+<p><strong>Secret:</strong> <code>{{ secret }}</code></p>
+<p><strong>Provisioning URI:</strong> <code>{{ uri }}</code></p>
+<form method="post" action="/settings/totp/enable">
+  <input type="hidden" name="_csrf" value="{{ csrf }}">
+  <input type="hidden" name="setup_token" value="{{ setup_token }}">
+  <label>Verification code <input name="code" required inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code"></label>
+  <button>Enable 2FA</button>
+</form>
+<p><a href="/settings">Cancel</a></p>
+{% endblock %}

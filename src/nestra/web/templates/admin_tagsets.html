@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% set title = "Tagsets" %}
+{% block content %}
+<h1>Tagsets</h1>
+<nav aria-label="Admin"><a href="/admin/users">Users</a> · <a href="/admin/sites">Sites</a> · <a href="/admin/providers">Providers</a> · <a href="/admin/system">System</a> · <a href="/admin/audit">Audit</a></nav>
+<p>Builds run in the background. Manual review is optional unless the group requires it.</p>
+<h2>Create group</h2>
+<form method="post" action="/admin/tagset/groups"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>Slug <input name="slug" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label><label>Name <input name="name" required></label><label>Description <input name="description"></label><label>Build mode <select name="build_mode"><option value="llm">Direct LLM</option><option value="embedding">Embedding (offline extra required)</option></select></label><button>Create group</button></form>
+{% for row in rows %}
+<section><h2>{{ row.name }}</h2><p><code>{{ row.slug }}</code> · {{ row.status }} · {{ row.tags }} tags · version {{ row.tagset_version or "none" }}</p>
+<form method="post" action="/admin/tagset/build"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="group" value="{{ row.slug }}"><label>Mode <select name="mode"><option value="llm">Direct LLM</option><option value="embedding">Embedding + clustering (offline extra required)</option></select></label><label><input type="checkbox" name="require_manual_review" value="1"> Require review before freezing</label><button>Build</button></form>
+<p><a href="/admin/tagset/{{ row.slug }}/report">Review report</a></p>
+<form method="post" action="/admin/tagset/{{ row.slug }}/freeze"><input type="hidden" name="_csrf" value="{{ csrf }}"><label><input type="checkbox" name="confirm" value="1" required> I reviewed the draft</label><button>Freeze draft</button></form>
+</section>
+{% else %}<p>No tagset groups.</p>{% endfor %}
+{% endblock %}
