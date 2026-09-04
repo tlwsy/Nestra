@@ -7,26 +7,37 @@ COPY --from=uv /uv /uvx /bin/
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends binutils \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project \
     --extra crawl --extra web --extra notify
 COPY src ./src
 RUN uv sync --frozen --no-dev --no-editable \
-    --extra crawl --extra web --extra notify
+    --extra crawl --extra web --extra notify \
+    && find /opt/venv -type f \( -name '*.abi3.so' -o -name '*.cpython-*.so' \) \
+        -exec strip --strip-unneeded {} +
 
 # Heavy dependencies are explicit build targets; default `runtime` stays 2C2G-friendly.
 FROM builder AS builder-render
 RUN uv sync --frozen --no-dev --no-editable \
-    --extra crawl --extra web --extra notify --extra render
+    --extra crawl --extra web --extra notify --extra render \
+    && find /opt/venv -type f \( -name '*.abi3.so' -o -name '*.cpython-*.so' \) \
+        -exec strip --strip-unneeded {} +
 
 FROM builder AS builder-local
 RUN uv sync --frozen --no-dev --no-editable \
-    --extra crawl --extra web --extra notify --extra local
+    --extra crawl --extra web --extra notify --extra local \
+    && find /opt/venv -type f \( -name '*.abi3.so' -o -name '*.cpython-*.so' \) \
+        -exec strip --strip-unneeded {} +
 
 FROM builder AS builder-full
 RUN uv sync --frozen --no-dev --no-editable \
-    --extra crawl --extra web --extra notify --extra render --extra local
+    --extra crawl --extra web --extra notify --extra render --extra local \
+    && find /opt/venv -type f \( -name '*.abi3.so' -o -name '*.cpython-*.so' \) \
+        -exec strip --strip-unneeded {} +
 
 FROM python:3.12-slim-bookworm AS runtime-base
 ARG NESTRA_UID=1000
