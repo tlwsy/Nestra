@@ -144,7 +144,9 @@ class TaggerChain:
         self.persist_result(article_id, tagset, result)
         return result
 
-    async def summarize_article(self, article_id: int, article: ArticleText) -> None:
+    async def summarize_article(
+        self, article_id: int, article: ArticleText, *, on_demand: bool = False
+    ) -> None:
         setting = self.db.query_one(
             "SELECT s.enabled,s.provider,s.model,a.status,a.summary_backend "
             "FROM ai_summary_settings s JOIN articles a ON a.id=? WHERE s.id=1",
@@ -152,9 +154,9 @@ class TaggerChain:
         )
         if setting is None:
             raise TaggerError(f"文章 {article_id} 不存在")
-        if setting["status"] != "EXTRACTED":
+        if not on_demand and setting["status"] != "EXTRACTED":
             raise TaggerError(f"文章 {article_id} 状态不是 EXTRACTED: {setting['status']}")
-        if not setting["enabled"] or setting["summary_backend"]:
+        if (not on_demand and not setting["enabled"]) or setting["summary_backend"]:
             return
 
         provider = next(
@@ -189,8 +191,14 @@ class TaggerChain:
         self._record_success(provider.name)
         self.db.execute(
             "UPDATE articles SET summary=?,summary_backend=?,summarized_at=? "
-            "WHERE id=? AND status='EXTRACTED' AND summary_backend IS NULL",
-            (summary, f"{provider.name}:{setting['model']}", now_iso(), article_id),
+            "WHERE id=? AND summary_backend IS NULL AND (status='EXTRACTED' OR ?)",
+            (
+                summary,
+                f"{provider.name}:{setting['model']}",
+                now_iso(),
+                article_id,
+                on_demand,
+            ),
         )
 
     def persist_result(self, article_id: int, tagset: Tagset, result: TagResult) -> None:

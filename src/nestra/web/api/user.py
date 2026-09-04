@@ -12,8 +12,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 
 from nestra.core.crypto import fingerprint
+from nestra.core.errors import AllBackendsFailed, TaggerError
 from nestra.core.logging import safe_error
-from nestra.core.time import now_iso, parse_quiet_hours
+from nestra.core.models import ArticleText
+from nestra.core.time import from_iso, now_iso, parse_quiet_hours
 from nestra.extractor.sanitize import sanitize_html
 from nestra.notifier.apprise_client import (
     ALLOWED_APPRISE_SCHEMES,
@@ -545,20 +547,23 @@ async def articles(request: Request, user: CurrentUser):
     )
 
 
-@router.get("/articles/{article_id}")
-async def article(article_id: int, request: Request, user: CurrentUser):
+def _visible_article(request: Request, article_id: int, user: dict[str, Any]):
     if user["role"] == "admin":
-        row = request.app.state.db.query_one(
+        return request.app.state.db.query_one(
             "SELECT a.*,si.name AS site FROM articles a JOIN sites si ON si.id=a.site_id WHERE a.id=?",
             (article_id,),
         )
-    else:
-        row = request.app.state.db.query_one(
-            "SELECT DISTINCT a.*,si.name AS site FROM articles a JOIN sites si ON si.id=a.site_id "
-            "JOIN deliveries d ON d.article_id=a.id JOIN subscriptions s ON s.id=d.subscription_id "
-            "WHERE a.id=? AND s.user_id=? AND d.status='sent'",
-            (article_id, user["id"]),
-        )
+    return request.app.state.db.query_one(
+        "SELECT DISTINCT a.*,si.name AS site FROM articles a JOIN sites si ON si.id=a.site_id "
+        "JOIN deliveries d ON d.article_id=a.id JOIN subscriptions s ON s.id=d.subscription_id "
+        "WHERE a.id=? AND s.user_id=? AND d.status='sent'",
+        (article_id, user["id"]),
+    )
+
+
+@router.get("/articles/{article_id}")
+async def article(article_id: int, request: Request, user: CurrentUser):
+    row = _visible_article(request, article_id, user)
     if row is None:
         raise HTTPException(404)
     item = dict(row)
@@ -573,16 +578,68 @@ async def article(article_id: int, request: Request, user: CurrentUser):
     ]
     if wants_json(request):
         return item
+    summary_setting = request.app.state.db.query_one(
+        "SELECT provider,model FROM ai_summary_settings WHERE id=1"
+    )
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="article.html",
         context={
             "article": item,
+            "can_summarize": bool(
+                item.get("content_text")
+                and not item.get("summary_backend")
+                and summary_setting
+                and summary_setting["provider"]
+                and summary_setting["model"]
+                and getattr(request.app.state, "scheduler", None)
+            ),
             "admin_view": user["role"] == "admin",
             "user": user,
             "csrf": request.cookies.get(CSRF_COOKIE, ""),
         },
     )
+
+
+@router.post("/articles/{article_id}/summarize")
+async def summarize_article(article_id: int, request: Request, user: CurrentUser):
+    data = await request_data(request)
+    write_guard(request, data, user)
+    request.app.state.limiter.check("article-summary", str(user["id"]), 5, 60)
+    row = _visible_article(request, article_id, user)
+    if row is None:
+        raise HTTPException(404)
+    if not (row["content_text"] or "").strip():
+        raise HTTPException(409, "article has no extracted content")
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        raise HTTPException(503, "AI summarization is unavailable")
+    article_text = ArticleText(
+        title=row["title"] or "无标题",
+        content_text=row["content_text"],
+        content_html=row["content_html"] or "",
+        summary=row["summary"],
+        author=row["author"],
+        published_at=from_iso(row["published_at"]),
+        lang=row["lang"],
+    )
+    try:
+        await scheduler.dependencies.tagger.summarize_article(
+            article_id, article_text, on_demand=True
+        )
+    except AllBackendsFailed as exc:
+        raise HTTPException(502, safe_error(exc)) from exc
+    except TaggerError as exc:
+        raise HTTPException(409, safe_error(exc)) from exc
+    audit(
+        request.app.state.db,
+        "article.summarized",
+        request=request,
+        user_id=user["id"],
+        target_type="article",
+        target_id=article_id,
+    )
+    return _form_response(request, {"ok": True}, f"/articles/{article_id}")
 
 
 def _attachment_file(request: Request, row) -> FileResponse:

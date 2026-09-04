@@ -237,6 +237,7 @@ ZH = {
     "summary": "摘要",
     "Summary": "摘要",
     "AI summary": "AI 总结",
+    "Generate AI summary": "生成 AI 总结",
     "delivered at": "投递时间",
     "Delivered At": "投递时间",
     "admin": "管理员",

@@ -14,6 +14,15 @@
     {% if admin_view %}<span class="badge {{ 'badge-danger' if article.status == 'FAILED' else 'badge-success' if article.status in ('EXTRACTED', 'TAGGED', 'NOTIFIED') else 'badge-neutral' }}">{{ article.status }}</span>{% endif %}
     {% if article.published_at %}<span>·</span> <time class="tabular-nums">{{ article.published_at }}</time>{% endif %}
   </div>
+  {% if can_summarize %}
+  <form method="post" action="/articles/{{ article.id }}/summarize" style="margin-bottom: 20px;">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <button type="submit" class="btn btn-primary">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+      <span>{{ t("Generate AI summary") }}</span>
+    </button>
+  </form>
+  {% endif %}
   {% if admin_view and article.last_error %}<div class="alert alert-danger" role="alert">{{ article.last_error }}</div>{% endif %}
   {% if article.summary %}
   <section class="card" style="margin-bottom: 24px;">

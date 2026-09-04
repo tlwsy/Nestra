@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import respx
 import yaml
 
 from nestra.core.config import ProviderConfig
@@ -237,6 +238,59 @@ async def test_admin_can_choose_and_toggle_summary_ai(web_ui) -> None:
     )
     assert disabled.status_code == 200
     assert app.state.db.query_one("SELECT enabled FROM ai_summary_settings WHERE id=1")[0] == 0
+
+
+@respx.mock
+async def test_article_can_be_summarized_on_demand_after_delivery(web_ui) -> None:
+    app, client, csrf = web_ui
+    await client.post(
+        "/admin/providers?format=json",
+        json={
+            "name": "summary-ai",
+            "type": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "models": "summary-model",
+            "api_key": "summary-secret",
+        },
+        headers={"x-csrf-token": csrf},
+    )
+    await client.post(
+        "/admin/providers/summarization?format=json",
+        json={"enabled": False, "backend": "summary-ai|summary-model"},
+        headers={"x-csrf-token": csrf},
+    )
+    timestamp = now_iso()
+    group_id = app.state.db.query_one("SELECT id FROM tagset_groups WHERE slug='test'")[0]
+    site_id = app.state.db.execute(
+        "INSERT INTO sites "
+        "(slug,name,base_url,discovery_mode,tagset_group_id,config_json,created_at,updated_at) "
+        "VALUES ('summary-site','Summary site','https://example.test','rss',?,'{}',?,?)",
+        (group_id, timestamp, timestamp),
+    ).lastrowid
+    article_id = app.state.db.execute(
+        "INSERT INTO articles "
+        "(site_id,url,url_hash,title,content_text,content_html,status,discovered_at) "
+        "VALUES (?,'https://example.test/article','summary-hash','Old article',"
+        "'Article body','<p>Article body</p>','NOTIFIED',?)",
+        (site_id, timestamp),
+    ).lastrowid
+    route = respx.post("https://api.example.test/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"summary":"Generated summary"}'}}]},
+        )
+    )
+
+    page = await client.get(f"/articles/{article_id}")
+    assert "Generate AI summary" in page.text
+    response = await client.post(f"/articles/{article_id}/summarize", data={"_csrf": csrf})
+
+    assert response.status_code == 303 and route.call_count == 1
+    row = app.state.db.query_one(
+        "SELECT status,summary,summary_backend FROM articles WHERE id=?", (article_id,)
+    )
+    assert tuple(row) == ("NOTIFIED", "Generated summary", "summary-ai:summary-model")
+    assert "Generate AI summary" not in (await client.get(f"/articles/{article_id}")).text
 
 
 async def test_admin_can_manage_encrypted_web_provider(web_ui) -> None:
