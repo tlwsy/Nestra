@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 import yaml
 
-from nestra.core.config import Settings, SiteConfig, load_settings
+from nestra.core.config import ProviderConfig, Settings, SiteConfig, load_settings
 from nestra.core.errors import ConfigError, ConfigValidationError
 
 pytestmark = pytest.mark.unit
@@ -356,6 +356,21 @@ def test_provider_base_url_is_plain_https(url: str) -> None:
                 }
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("https://api.deepseek.com", "https://api.deepseek.com/v1"),
+        ("https://api.deepseek.com/", "https://api.deepseek.com/"),
+        ("https://api.deepseek.com/custom", "https://api.deepseek.com/custom"),
+    ],
+)
+def test_openai_base_url_adds_v1_only_to_bare_domain(value: str, expected: str) -> None:
+    provider = ProviderConfig(
+        name="provider", type="openai_compatible", base_url=value, models=["model"]
+    )
+    assert provider.base_url == expected
 
 
 def test_https_base_url_requires_secure_cookie(write_config) -> None:

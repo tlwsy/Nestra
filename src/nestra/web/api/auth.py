@@ -38,12 +38,19 @@ from ..security import (
 router = APIRouter()
 
 
-def _csrf_page(request: Request, template: str, context: dict | None = None) -> HTMLResponse:
+def _csrf_page(
+    request: Request,
+    template: str,
+    context: dict | None = None,
+    *,
+    status_code: int = 200,
+) -> HTMLResponse:
     token = csrf_token(request.app.state.crypto)
     response = request.app.state.templates.TemplateResponse(
         request=request,
         name=template,
         context={"csrf": token, **(context or {})},
+        status_code=status_code,
     )
     response.set_cookie(
         CSRF_COOKIE,
@@ -92,12 +99,40 @@ async def login_page(request: Request) -> HTMLResponse:
 @router.post("/login")
 async def login(request: Request):
     data = await request_data(request)
-    require_csrf(request, data)
-    request.app.state.limiter.check("login-global", "*", 120, 60)
-    request.app.state.limiter.check("login-client", request.state.client_ip, 10, 300)
-    request.app.state.limiter.check(
-        "login-peer", request.client.host if request.client else "", 300, 300
-    )
+    raw_username = str(data.get("username", "")).strip()
+
+    def _login_error(detail: str, status_code: int = 401):
+        if wants_json(request) or request.headers.get("content-type", "").startswith("application/json"):
+            raise HTTPException(status_code, detail)
+        zh = request.cookies.get(LOCALE_COOKIE) == "zh"
+        msg = "用户名或密码错误" if zh else "Invalid username or password"
+        if "two_factor" in detail or "2FA" in detail or "totp" in detail:
+            msg = "双重验证码错误" if zh else "Invalid two-factor authentication code"
+        elif "locked" in detail:
+            msg = "账号已被临时锁定，请稍后再试" if zh else "Account temporarily locked. Please try again later."
+        elif "disabled" in detail:
+            msg = "账号已被禁用" if zh else "Account is deactivated"
+        elif status_code == 429:
+            msg = "尝试次数过多，已被限流，请稍后重试" if zh else "Too many login attempts. Please try again later."
+        elif status_code == 400:
+            msg = "会话已过期，请刷新后重试" if zh else "Session expired. Please try again."
+        return _csrf_page(
+            request,
+            "login.html",
+            context={"error": msg, "username": raw_username},
+            status_code=status_code,
+        )
+
+    try:
+        require_csrf(request, data)
+        request.app.state.limiter.check("login-global", "*", 120, 60)
+        request.app.state.limiter.check("login-client", request.state.client_ip, 10, 300)
+        request.app.state.limiter.check(
+            "login-peer", request.client.host if request.client else "", 300, 300
+        )
+    except HTTPException as exc:
+        return _login_error(str(exc.detail), status_code=exc.status_code)
+
     try:
         username = validate_username(data.get("username"))
     except ValueError:
@@ -109,21 +144,21 @@ async def login(request: Request):
     if row is None:
         verify_password(str(data.get("password", ""))[:1024], request.app.state.fake_password_hash)
         _login_failure(request, None, reason="credentials")
-        raise HTTPException(401, "invalid credentials")
+        return _login_error("invalid credentials")
     locked_until = from_iso(row["locked_until"])
     locked = bool(locked_until and locked_until > now())
     if not row["is_active"]:
         _login_failure(request, row, reason="locked")
-        raise HTTPException(401, "invalid credentials")
+        return _login_error("invalid credentials: disabled")
     password = data.get("password")
     if not isinstance(password, str) or not verify_password(password[:1024], row["password_hash"]):
         _login_failure(request, row, reason="locked" if locked else "credentials")
-        raise HTTPException(401, "invalid credentials")
+        return _login_error("invalid credentials: locked" if locked else "invalid credentials")
     if row["totp_secret"]:
         try:
             secret = request.app.state.crypto.decrypt(bytes(row["totp_secret"]))
-        except Exception as exc:
-            raise HTTPException(401, "invalid credentials") from exc
+        except Exception:
+            return _login_error("invalid credentials")
         code = data.get("totp")
         recovered = False
         if isinstance(code, str) and not verify_totp(secret, code):
@@ -139,10 +174,10 @@ async def login(request: Request):
                 recovered = True
             else:
                 _login_failure(request, row, reason="locked" if locked else "two_factor")
-                raise HTTPException(401, "invalid credentials")
+                return _login_error("invalid credentials: two_factor")
         elif not isinstance(code, str):
             _login_failure(request, row, reason="locked" if locked else "two_factor")
-            raise HTTPException(401, "invalid credentials")
+            return _login_error("invalid credentials: two_factor")
         if recovered:
             audit(
                 request.app.state.db, "auth.recovery_code_used", request=request, user_id=row["id"]
@@ -215,23 +250,53 @@ async def setup_page(request: Request, token: str = ""):
 @router.post("/setup")
 async def setup(request: Request):
     data = await request_data(request)
-    require_csrf(request, data)
-    request.app.state.limiter.check("setup-ip", request.state.client_ip, 5, 300)
+    raw_username = str(data.get("username", "")).strip()
+    token = str(data.get("token", ""))
+
+    def _setup_error(detail: str, status_code: int = 400):
+        if wants_json(request) or request.headers.get("content-type", "").startswith("application/json"):
+            raise HTTPException(status_code, detail)
+        zh = request.cookies.get(LOCALE_COOKIE) == "zh"
+        msg = "创建管理员失败: " + detail if zh else f"Setup failed: {detail}"
+        return _csrf_page(
+            request,
+            "setup.html",
+            context={"error": msg, "username": raw_username, "setup_token": token},
+            status_code=status_code,
+        )
+
+    try:
+        require_csrf(request, data)
+        request.app.state.limiter.check("setup-ip", request.state.client_ip, 5, 300)
+    except HTTPException as exc:
+        return _setup_error(str(exc.detail), status_code=exc.status_code)
+
     try:
         payload = request.app.state.crypto.verify_payload(
             str(data.get("token", "")), purpose="setup"
         )
         if payload.get("kind") != "setup":
-            raise ValueError
+            return _setup_error("设置令牌无效" if request.cookies.get(LOCALE_COOKIE) == "zh" else "Invalid setup token", 400)
+    except Exception:
+        return _setup_error("设置令牌无效或已过期" if request.cookies.get(LOCALE_COOKIE) == "zh" else "Invalid or expired setup token", 400)
+
+    try:
         username = validate_username(data.get("username"))
+    except ValueError:
+        return _setup_error("用户名格式不合法（只允许字母、数字、点、下划线与连字符）" if request.cookies.get(LOCALE_COOKIE) == "zh" else "Invalid username format", 400)
+
+    try:
         password = validate_password(data.get("password"))
-    except Exception as exc:
-        raise HTTPException(400, "invalid setup request") from exc
+    except ValueError:
+        return _setup_error("密码长度至少需 12 位" if request.cookies.get(LOCALE_COOKIE) == "zh" else "Password must be at least 12 characters", 400)
+
     timestamp = to_iso(now())
     try:
         with request.app.state.db.transaction() as conn:
             if conn.execute("SELECT id FROM users LIMIT 1").fetchone():
-                raise HTTPException(404)
+                if wants_json(request):
+                    raise HTTPException(404)
+                return RedirectResponse("/login", 303)
             cursor = conn.execute(
                 "INSERT INTO users (username,password_hash,role,created_at,updated_at) VALUES (?,?,'admin',?,?)",
                 (username, hash_password(password), timestamp, timestamp),
@@ -332,14 +397,22 @@ async def change_advanced_mode(request: Request, user: CurrentUser):
 
 @router.post("/settings/password")
 async def change_password(request: Request, user: CurrentUser):
+    import urllib.parse
     data = await request_data(request)
     write_guard(request, data, user)
+    zh = request.cookies.get(LOCALE_COOKIE) == "zh"
     if not verify_password(str(data.get("old_password", "")), user["password_hash"]):
-        raise HTTPException(400, "current password is incorrect")
+        if wants_json(request):
+            raise HTTPException(400, "current password is incorrect")
+        err = "当前密码不正确" if zh else "Current password is incorrect"
+        return RedirectResponse(f"/settings?error={urllib.parse.quote(err)}", 303)
     try:
         password = validate_password(data.get("new_password"))
     except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+        if wants_json(request):
+            raise HTTPException(400, str(exc)) from exc
+        err = "新密码长度至少需要 12 位" if zh else "Password must be at least 12 characters"
+        return RedirectResponse(f"/settings?error={urllib.parse.quote(err)}", 303)
     with request.app.state.db.transaction() as conn:
         conn.execute(
             "UPDATE users SET password_hash=?,must_change_password=0,updated_at=? WHERE id=?",
@@ -350,7 +423,8 @@ async def change_password(request: Request, user: CurrentUser):
             (to_iso(now()), user["id"], user["session_id"]),
         )
     audit(request.app.state.db, "user.password_changed", request=request, user_id=user["id"])
-    return JSONResponse({"ok": True}) if wants_json(request) else RedirectResponse("/settings", 303)
+    success_msg = urllib.parse.quote("密码修改成功" if zh else "Password updated successfully")
+    return JSONResponse({"ok": True}) if wants_json(request) else RedirectResponse(f"/settings?success={success_msg}", 303)
 
 
 @router.post("/settings/sessions/revoke")
@@ -412,7 +486,23 @@ async def enable_totp(request: Request, user: CurrentUser):
         ):
             raise ValueError
     except Exception as exc:
-        raise HTTPException(400, "invalid TOTP setup") from exc
+        if wants_json(request):
+            raise HTTPException(400, "invalid TOTP setup") from exc
+        zh = request.cookies.get(LOCALE_COOKIE) == "zh"
+        err = "验证码错误，请重新输入" if zh else "Invalid verification code. Please try again."
+        return request.app.state.templates.TemplateResponse(
+            request=request,
+            name="totp_setup.html",
+            context={
+                "user": user,
+                "csrf": request.cookies.get(CSRF_COOKIE, ""),
+                "setup_token": str(data.get("setup_token", "")),
+                "secret": payload.get("secret", "") if "payload" in locals() and isinstance(payload, dict) else "",
+                "uri": provisioning_uri(payload.get("secret", ""), user["username"]) if "payload" in locals() and isinstance(payload, dict) and payload.get("secret") else "",
+                "error": err,
+            },
+            status_code=400,
+        )
     codes = [new_token(8) for _ in range(8)]
     with request.app.state.db.transaction() as conn:
         cursor = conn.execute(
@@ -443,23 +533,34 @@ async def enable_totp(request: Request, user: CurrentUser):
 
 @router.post("/settings/totp/disable")
 async def disable_totp(request: Request, user: CurrentUser):
+    import urllib.parse
     data = await request_data(request)
     write_guard(request, data, user)
+    zh = request.cookies.get(LOCALE_COOKIE) == "zh"
     password = data.get("password")
     code = data.get("code")
     if not isinstance(password, str) or not verify_password(password[:1024], user["password_hash"]):
-        raise HTTPException(400, "invalid password or 2FA code")
+        if wants_json(request):
+            raise HTTPException(400, "invalid password or 2FA code")
+        err = "当前密码不正确" if zh else "Current password is incorrect"
+        return RedirectResponse(f"/settings?error={urllib.parse.quote(err)}", 303)
     try:
         secret = request.app.state.crypto.decrypt(bytes(user["totp_secret"]))
     except Exception as exc:
-        raise HTTPException(400, "invalid password or 2FA code") from exc
+        if wants_json(request):
+            raise HTTPException(400, "invalid password or 2FA code") from exc
+        err = "双重验证状态异常" if zh else "Invalid 2FA status"
+        return RedirectResponse(f"/settings?error={urllib.parse.quote(err)}", 303)
     recovery_hash = hash_token(code) if isinstance(code, str) else ""
     recovery = request.app.state.db.query_one(
         "SELECT code_hash FROM recovery_codes WHERE user_id=? AND code_hash=?",
         (user["id"], recovery_hash),
     )
     if not (isinstance(code, str) and verify_totp(secret, code)) and recovery is None:
-        raise HTTPException(400, "invalid password or 2FA code")
+        if wants_json(request):
+            raise HTTPException(400, "invalid password or 2FA code")
+        err = "双重验证码或恢复码不正确" if zh else "Invalid 2FA or recovery code"
+        return RedirectResponse(f"/settings?error={urllib.parse.quote(err)}", 303)
     with request.app.state.db.transaction() as conn:
         conn.execute(
             "UPDATE users SET totp_secret=NULL,updated_at=? WHERE id=?", (to_iso(now()), user["id"])

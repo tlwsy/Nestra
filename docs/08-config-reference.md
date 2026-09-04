@@ -184,7 +184,7 @@ sites:
 | `max_tags_per_article` | 单篇最多打几个标签 |
 | `min_confidence_to_store` | 低于此值不入库。与订阅的 `min_confidence` 是两级过滤 |
 | `llm.providers[].type` | `openai_compatible` 覆盖多数服务；`gemini` / `anthropic` 需专用适配器 |
-| `llm.providers[].api_key_env` | **变量名，不是值** |
+| `llm.providers[].api_key_env` | YAML provider 使用的**变量名，不是值**；通常直接在 Web 中加密配置 provider |
 | `llm.providers[].models` | 顺序即优先级，内层遍历 |
 | `llm.max_retries_per_model` | 仅对瞬时错误生效 |
 | `circuit_breaker.*` | 熔断参数，状态持久化到 DB |
@@ -251,7 +251,7 @@ rebinding 或重定向绕过创建阶段校验。
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `NESTRA_SECRET_KEY` | **是** | `openssl rand -base64 32`。丢失后已存的推送目标无法解密 |
-| `<PROVIDER>_API_KEY` | 否 | 名称需与 `api_key_env` 一致；全部缺失时抓取继续，文章停在 `EXTRACTED` |
+| `<PROVIDER>_API_KEY` | 否 | 仅 YAML provider 需要；Web provider 的密钥加密存入数据库 |
 | `NESTRA_ADMIN_PASSWORD` | 否 | 留空则走 setup token 流程 |
 | `NESTRA__APP__LOG_LEVEL` | 否 | 覆盖 `app.log_level` |
 | `NESTRA_CONFIG` | 否 | 配置路径；容器默认 `/app/config/config.yaml` |

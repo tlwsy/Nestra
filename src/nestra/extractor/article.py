@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import re
+from html import escape
 from urllib.parse import urljoin
 
 import trafilatura
-from selectolax.parser import HTMLParser
+from selectolax.parser import HTMLParser, Node
 
 from ..core.config import ExtractConfig, SiteAttachmentConfig
 from ..core.errors import ContentRejected, ContentTooShort, SelectorMiss
 from ..core.models import ArticleText, AttachmentRef
 from ..core.time import parse_flexible
 from .sanitize import sanitize_html
+
+_PDF_WIDGET = re.compile(r"showVsbpdfIframe\(\s*(['\"])([^'\"]+?)\1", re.I)
 
 
 def _select(tree: HTMLParser, expression: str) -> str | None:
@@ -44,6 +47,48 @@ def _metadata(tree: HTMLParser, key: str, config: ExtractConfig) -> str | None:
     return _select(tree, expression) if expression else None
 
 
+def _attachments(
+    tree: HTMLParser,
+    content_root: Node | None,
+    url: str,
+    config: SiteAttachmentConfig,
+    max_attachments: int,
+) -> list[AttachmentRef]:
+    link_patterns = [re.compile(pattern, re.I) for pattern in config.link_patterns]
+    text_patterns = [re.compile(pattern, re.I) for pattern in config.anchor_text_patterns]
+    inline_patterns = [re.compile(pattern, re.I) for pattern in config.inline_image_patterns]
+    found: list[AttachmentRef] = []
+    seen: set[str] = set()
+
+    def add(href: str, filename: str | None, *, is_body: bool = False) -> None:
+        source_url = urljoin(url, href)
+        if source_url in seen or len(found) >= max_attachments:
+            return
+        seen.add(source_url)
+        found.append(AttachmentRef(source_url, filename, filename, is_body))
+
+    if content_root is not None:
+        for script in content_root.css("script"):
+            for match in _PDF_WIDGET.finditer(script.text()):
+                add(match.group(2), "正文.pdf", is_body=True)
+
+    for anchor in tree.css("a[href]"):
+        href = anchor.attributes.get("href", "").strip()
+        if not href or not any(pattern.search(href) for pattern in link_patterns):
+            continue
+        absolute = urljoin(url, href)
+        if not any(pattern.search(absolute) for pattern in inline_patterns):
+            add(href, anchor.text(separator=" ", strip=True) or None)
+
+    if content_root is not None:
+        for anchor in content_root.css("a[href]"):
+            text = anchor.text(separator=" ", strip=True)
+            href = anchor.attributes.get("href", "").strip()
+            if href and any(pattern.search(text) for pattern in text_patterns):
+                add(href, text or None)
+    return found
+
+
 def extract_article(
     html: str,
     url: str,
@@ -56,33 +101,16 @@ def extract_article(
     max_attachments: int = 10,
 ) -> ArticleText:
     tree = HTMLParser(html)
+    content_root = tree.css_first(config.selectors.get("content", "body"))
+    attachments = (
+        _attachments(tree, content_root, url, attachment_config, max_attachments)
+        if attachment_config and attachment_config.enabled
+        else []
+    )
     selected = _selector_content(tree, config)
     document = None
-    if selected:
+    if selected is not None:
         content_text, content_html = selected
-        if len(content_text) < config.min_content_length:
-            # A stale selector may still match navigation or a placeholder. Give the
-            # generic extractor one chance before surfacing a configuration failure.
-            document = trafilatura.bare_extraction(
-                html,
-                url=url,
-                include_links=True,
-                include_formatting=True,
-                with_metadata=True,
-            )
-            fallback_text = (document.text or "").strip() if document else ""
-            if len(fallback_text) > len(content_text):
-                content_text = fallback_text
-                content_html = (
-                    trafilatura.extract(
-                        html,
-                        url=url,
-                        output_format="html",
-                        include_links=True,
-                        include_formatting=True,
-                    )
-                    or ""
-                )
     else:
         document = trafilatura.bare_extraction(
             html,
@@ -109,11 +137,21 @@ def extract_article(
     title = title or title_hint
     if not title:
         raise SelectorMiss(f"无法提取标题: {url}")
+    if len(content_text) < config.min_content_length and attachments:
+        links = "".join(
+            f'<li><a href="{escape(item.source_url, quote=True)}">'
+            f"{escape(item.filename or '附件')}</a></li>"
+            for item in attachments
+        )
+        content_text = f"{content_text}\n正文见附件：" + "、".join(
+            item.filename or "附件" for item in attachments
+        )
+        content_html += f"<p>正文见附件：</p><ul>{links}</ul>"
     if any(re.search(pattern, title, re.I) for pattern in config.reject_title_patterns) or any(
         re.search(pattern, content_text, re.I) for pattern in config.reject_content_patterns
     ):
         raise ContentRejected(f"页面命中拒绝规则: {url}")
-    if len(content_text) < config.min_content_length:
+    if len(content_text) < config.min_content_length and not attachments:
         raise ContentTooShort(
             f"正文仅 {len(content_text)} 字符，低于 {config.min_content_length}: {url}"
         )
@@ -129,27 +167,6 @@ def extract_article(
         published = match.group(1) if match.lastindex else match.group(0)
     document_date = parse_flexible(document.date) if document and document.date else None
     published_at = parse_flexible(published) if published else published_hint or document_date
-    attachments: list[AttachmentRef] = []
-    if attachment_config and attachment_config.enabled:
-        root = tree.css_first(config.selectors.get("content", "body")) or tree
-        link_patterns = [re.compile(pattern, re.I) for pattern in attachment_config.link_patterns]
-        text_patterns = [
-            re.compile(pattern, re.I) for pattern in attachment_config.anchor_text_patterns
-        ]
-        inline_patterns = [
-            re.compile(pattern, re.I) for pattern in attachment_config.inline_image_patterns
-        ]
-        for anchor in root.css("a[href]"):
-            href = urljoin(url, anchor.attributes.get("href", ""))
-            text = anchor.text(separator=" ", strip=True) or None
-            is_inline = any(pattern.search(href) for pattern in inline_patterns)
-            is_attachment = any(pattern.search(href) for pattern in link_patterns) or any(
-                pattern.search(text or "") for pattern in text_patterns
-            )
-            if href and is_attachment and not is_inline:
-                attachments.append(AttachmentRef(href, text, text))
-                if len(attachments) >= max_attachments:
-                    break
     return ArticleText(
         title=title,
         author=author,

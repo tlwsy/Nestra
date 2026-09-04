@@ -176,6 +176,65 @@ async def invoke_inducer(inducer: Inducer, prompt: str) -> list[CandidateTag]:
     return parse_candidates(raw)
 
 
+async def request_json(
+    provider: ProviderConfig,
+    model: str,
+    prompt: str,
+    client: httpx.AsyncClient,
+    *,
+    max_tokens: int = 8192,
+) -> object:
+    """Send one structured-output request through a configured provider."""
+    if provider.type == "openai_compatible":
+        response = await client.post(
+            f"{provider.base_url.rstrip('/')}/chat/completions",  # type: ignore[union-attr]
+            headers={"Authorization": f"Bearer {provider.api_key}"},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"},
+                "temperature": 0,
+                "max_tokens": max_tokens,
+            },
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+    if provider.type == "gemini":
+        base = (provider.base_url or "https://generativelanguage.googleapis.com/v1beta").rstrip(
+            "/"
+        )
+        response = await client.post(
+            f"{base}/models/{model}:generateContent",
+            headers={"x-goog-api-key": provider.api_key or ""},
+            json={
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0,
+                    "responseMimeType": "application/json",
+                    "maxOutputTokens": max_tokens,
+                },
+            },
+        )
+        response.raise_for_status()
+        return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+    base = (provider.base_url or "https://api.anthropic.com/v1").rstrip("/")
+    response = await client.post(
+        f"{base}/messages",
+        headers={
+            "x-api-key": provider.api_key or "",
+            "anthropic-version": "2023-06-01",
+        },
+        json={
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": 0,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+    )
+    response.raise_for_status()
+    return response.json()["content"][0]["text"]
+
+
 class NativeLLMInducer:
     """Small native client. Provider order, then model order, is the fallback order."""
 
@@ -198,51 +257,4 @@ class NativeLLMInducer:
         raise TagsetNotReady(f"all bootstrap LLM providers failed: {detail}")
 
     async def _request(self, provider: ProviderConfig, model: str, prompt: str) -> object:
-        if provider.type == "openai_compatible":
-            response = await self.client.post(
-                f"{provider.base_url.rstrip('/')}/chat/completions",  # type: ignore[union-attr]
-                headers={"Authorization": f"Bearer {provider.api_key}"},
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0,
-                    "max_tokens": 8192,
-                },
-            )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        if provider.type == "gemini":
-            base = (provider.base_url or "https://generativelanguage.googleapis.com/v1beta").rstrip(
-                "/"
-            )
-            response = await self.client.post(
-                f"{base}/models/{model}:generateContent",
-                headers={"x-goog-api-key": provider.api_key or ""},
-                json={
-                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "temperature": 0,
-                        "responseMimeType": "application/json",
-                        "maxOutputTokens": 8192,
-                    },
-                },
-            )
-            response.raise_for_status()
-            return response.json()["candidates"][0]["content"]["parts"][0]["text"]
-        base = (provider.base_url or "https://api.anthropic.com/v1").rstrip("/")
-        response = await self.client.post(
-            f"{base}/messages",
-            headers={
-                "x-api-key": provider.api_key or "",
-                "anthropic-version": "2023-06-01",
-            },
-            json={
-                "model": model,
-                "max_tokens": 8192,
-                "temperature": 0,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-        )
-        response.raise_for_status()
-        return response.json()["content"][0]["text"]
+        return await request_json(provider, model, prompt, self.client)

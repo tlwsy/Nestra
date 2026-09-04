@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 
 from nestra.core.config import ExtractConfig, Settings, SiteAttachmentConfig
+from nestra.core.models import ArticleText, AttachmentRef
 from nestra.crawler.attachments import download_pending
 from nestra.crawler.fetcher import BinaryFetchResult, Fetcher
+from nestra.crawler.service import _hydrate_pdf_body
 from nestra.extractor.article import extract_article
 from nestra.storage.repositories.sites import import_yaml_sites
 
@@ -32,6 +34,55 @@ def test_extracts_pattern_links_and_enforces_cap() -> None:
     assert len(article.attachments) == 1
     assert article.attachments[0].source_url == "https://example.test/system/download.jsp?id=1"
     assert article.attachments[0].filename == "课程表.docx"
+
+
+def test_extracts_embedded_pdf_and_attachments_outside_content() -> None:
+    article = extract_article(
+        """<html><body><nav>首页 查看人数等无用文字</nav><h1>通知</h1>
+        <main><script>showVsbpdfIframe('/__local/body.pdf','100%')</script></main>
+        <a href='/system/download.jsp?id=1'>附件1 申报表.docx</a></body></html>""",
+        "https://example.test/info/1",
+        ExtractConfig(min_content_length=100, selectors={"title": "h1", "content": "main"}),
+        attachment_config=SiteAttachmentConfig(
+            link_patterns=[r"/system/download\.jsp"], inline_image_patterns=[r"/__local/"]
+        ),
+    )
+    assert "首页" not in article.content_text
+    assert [item.source_url for item in article.attachments] == [
+        "https://example.test/__local/body.pdf",
+        "https://example.test/system/download.jsp?id=1",
+    ]
+    assert article.attachments[0].is_body
+
+
+async def test_hydrates_pdf_body_before_tagging(monkeypatch: pytest.MonkeyPatch) -> None:
+    class PdfFetcher:
+        async def fetch_bytes(self, url, *, headers=None, max_bytes=None):
+            assert headers == {"Referer": "https://example.test/info/1"}
+            assert max_bytes == 20 * 1024**2
+            return BinaryFetchResult(url, 200, {}, b"%PDF fake")
+
+    monkeypatch.setattr("nestra.crawler.service._extract_pdf_text", lambda _data: "真正正文" * 30)
+    article = ArticleText(
+        "通知",
+        "正文见附件",
+        "<p>正文见附件</p>",
+        attachments=(
+            AttachmentRef(
+                "https://example.test/__local/body.pdf", "正文.pdf", "正文.pdf", is_body=True
+            ),
+        ),
+    )
+    hydrated = await _hydrate_pdf_body(
+        article,
+        PdfFetcher(),
+        "https://example.test/info/1",
+        min_content_length=100,
+        max_bytes=20 * 1024**2,
+        send_referer=True,
+    )
+    assert hydrated.content_text == "真正正文" * 30
+    assert "真正正文" in hydrated.content_html
 
 
 async def test_downloads_and_reuses_content_addressed_file(

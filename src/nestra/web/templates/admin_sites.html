@@ -1,15 +1,202 @@
 {% extends "base.html" %}
 {% set title = t("Sites") %}
 {% block content %}
-<h1>{{ t("Add site") if onboarding else t("Sites") }}</h1>
-<nav aria-label="{{ t('Admin') }}"><a href="/admin/users">{{ t("Users") }}</a> · <a href="/admin/tagset">{{ t("Tagsets") }}</a> · <a href="/admin/providers">{{ t("Providers") }}</a>{% if advanced %} · <a href="/admin/system">{{ t("System") }}</a>{% endif %} · <a href="/admin/audit">{{ t("Audit") }}</a></nav>
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Add site") if onboarding else t("Sites") }}</h1>
+    <p>{{ "配置文章抓取源站点、URL 发现模式、提取选择器与即时探测向导" if zh else "Configure web crawling targets, discovery methods, selectors and probe wizard." }}</p>
+  </div>
+  {% if not onboarding %}
+  <div>
+    <a href="/admin/sites/new" class="btn btn-primary" style="text-decoration: none;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <span>{{ t("Add a site") }}</span>
+    </a>
+  </div>
+  {% endif %}
+</div>
+
+<nav aria-label="{{ t('Admin') }}" class="sub-nav">
+  <a href="/admin/users">{{ t("Users") }}</a>
+  <span>·</span>
+  <a href="/admin/sites" class="active">{{ t("Sites") }}</a>
+  <span>·</span>
+  <a href="/admin/tagset">{{ t("Tagsets") }}</a>
+  <span>·</span>
+  <a href="/admin/providers">{{ t("Providers") }}</a>
+  {% if advanced %}
+  <span>·</span>
+  <a href="/admin/system">{{ t("System") }}</a>
+  {% endif %}
+  <span>·</span>
+  <a href="/admin/audit">{{ t("Audit") }}</a>
+</nav>
+
 {% if onboarding %}
-<p>{{ t("Onboarding is confirmation-based; the final site is created disabled.") }}</p><ol><li>{{ t("Probe") }}</li><li>{{ t("Choose or edit selectors") }}</li><li>{{ t("Dry-run") }}</li><li>{{ t("Inspect preview") }}</li><li>{{ t("Confirm") }}</li></ol>
-<h2>{{ t("Start probe") }}</h2><form method="post" action="/admin/sites/probe"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Public URL") }} <input type="url" name="url" required></label><button>{{ t("Probe") }}</button></form>
-<details><summary>{{ t("Manual JSON fallback") }}</summary><form method="post" action="/admin/sites/dryrun"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Candidate JSON") }} <textarea name="candidate" required rows="14"></textarea></label><label>{{ t("Tagset group") }} <select name="tagset_group" required>{% for group in groups %}<option value="{{ group.slug }}">{{ group.name }}</option>{% endfor %}</select></label><button>{{ t("Dry-run") }}</button></form></details>
-<p>{{ t("Complex sites may instead use") }} <code>nestra site sync</code> {{ t("with YAML.") }}</p>
+<div class="card" style="margin-bottom: 24px;">
+  <p style="margin-top: 0; font-size: var(--text-sm); color: var(--text-muted);">{{ t("Onboarding is confirmation-based; the final site is created disabled.") }}</p>
+  <ol class="step-wizard">
+    <li class="current">1. {{ t("Probe") }}</li>
+    <li>2. {{ t("Choose or edit selectors") }}</li>
+    <li>3. {{ t("Dry-run") }}</li>
+    <li>4. {{ t("Inspect preview") }}</li>
+    <li>5. {{ t("Confirm") }}</li>
+  </ol>
+
+  <h2 style="font-size: var(--text-md); margin-top: 20px;">{{ t("Start probe") }}</h2>
+  <form method="post" action="/admin/sites/probe" class="stack">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <label>{{ t("Public URL") }}
+      <input type="url" name="url" required placeholder="https://example.com/news">
+    </label>
+    <div>
+      <button type="submit">{{ t("Probe") }}</button>
+    </div>
+  </form>
+
+  <details style="margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+    <summary style="cursor: pointer; font-size: var(--text-sm); color: var(--text-muted); font-weight: 500;">{{ t("Manual JSON fallback") }}</summary>
+    <form method="post" action="/admin/sites/dryrun" class="stack" style="margin-top: 12px;">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <label>{{ t("Candidate JSON") }}
+        <textarea name="candidate" required rows="12"></textarea>
+      </label>
+      <label>{{ t("Tagset group") }}
+        <select name="tagset_group" required>
+          {% for group in groups %}
+          <option value="{{ group.slug }}">{{ group.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div>
+        <button type="submit">{{ t("Dry-run") }}</button>
+      </div>
+    </form>
+  </details>
+
+  <p style="margin: 20px 0 0; font-size: var(--text-xs); color: var(--text-muted);">
+    {{ t("Complex sites may instead use") }} <code>nestra site sync</code> {{ t("with YAML.") }}
+  </p>
+</div>
 {% else %}
-<p><a href="/admin/sites/new">{{ t("Add a site") }}</a></p>
-{% for row in rows %}<section><h2>{{ row.name }}</h2><p><code>{{ row.slug }}</code> · {{ row.discovery_mode }} · {{ row.tagset_group }} · {{ t("enabled") if row.enabled else t("disabled") }}</p><p>{{ row.base_url }}</p>{% if row.last_error %}<p>{{ t("Last crawl failed.") }}</p>{% endif %}<form method="post" action="/admin/sites/{{ row.id }}/status"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="enabled" value="{{ 0 if row.enabled else 1 }}"><button>{{ t("Disable") if row.enabled else t("Enable") }}</button></form>{% if row.enabled %}<form method="post" action="/admin/sites/{{ row.id }}/crawl"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>{{ t("Crawl now") }}</button></form>{% endif %}</section>{% else %}<p>{{ t("No sites.") }}</p>{% endfor %}
+
+{% if rows %}
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th scope="col">{{ t("Name") }}</th>
+        <th scope="col">{{ t("Slug") }}</th>
+        <th scope="col">{{ t("Mode") if not zh else "发现模式" }}</th>
+        <th scope="col">{{ t("Tagset group") }}</th>
+        <th scope="col">{{ t("Status") if not zh else "状态" }}</th>
+        <th scope="col">{{ t("Base URL") if not zh else "基础地址" }}</th>
+        <th scope="col" style="min-width: 250px;">{{ t("Actions") if not zh else "操作" }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><strong style="color: var(--text-primary);">{{ row.name }}</strong></td>
+        <td><code>{{ row.slug }}</code></td>
+        <td><span class="badge badge-neutral">{{ row.discovery_mode }}</span></td>
+        <td><span class="badge badge-neutral">{{ row.tagset_group }}</span></td>
+        <td>
+          {% if row.enabled %}
+            <span class="badge badge-success">{{ t("enabled") }}</span>
+          {% else %}
+            <span class="badge badge-neutral">{{ t("disabled") }}</span>
+          {% endif %}
+          <div style="margin-top: 6px; font-size: var(--text-xs); color: var(--text-muted);">
+            {{ t("Crawl frequency") }}: {{ t("Every") }} {{ row.crawl_interval_sec // 60 }} {{ t("minutes") }}
+          </div>
+          {% if row.crawl_task and row.crawl_task.status in ('queued', 'running') %}
+            <div style="margin-top: 6px;">
+              <span class="badge badge-warning" role="status">
+                {% if row.crawl_task.kind == 'backfill' %}{{ t("Backfilling") }} {{ row.crawl_task.pages }} {{ t("pages") }}{% else %}{{ t(row.crawl_task.status) }}{% endif %}
+              </span>
+            </div>
+          {% elif row.crawl_task and row.crawl_task.status == 'done' %}
+            <div style="margin-top: 6px; font-size: var(--text-xs); color: var(--status-success-text);">
+              {{ t("Backfill complete") if row.crawl_task.kind == 'backfill' else t("Crawl complete") }}{% if row.crawl_task.result %}: {{ row.crawl_task.result.discovered }} {{ t("discovered") }}, {{ row.crawl_task.result.extracted }} {{ t("extracted") }}{% endif %}
+            </div>
+          {% endif %}
+          {% if row.last_crawled_at %}
+            <div style="margin-top: 4px; font-size: var(--text-xs); color: var(--text-muted);">{{ t("Last crawl") }}: {{ row.last_crawled_at }}</div>
+          {% endif %}
+          {% if row.crawl_task and row.crawl_task.status == 'failed' %}
+            <div role="alert" style="margin-top: 6px; max-width: 360px; font-size: var(--text-xs); color: var(--status-danger-text); word-break: break-word;">
+              {{ t("Crawl failed") }}: {{ row.crawl_task.error }}
+            </div>
+          {% elif row.last_error %}
+            <div role="alert" style="margin-top: 6px; max-width: 360px; font-size: var(--text-xs); color: var(--status-danger-text); word-break: break-word;">
+              {{ t("Crawl failed") }}: {{ row.last_error }}
+            </div>
+          {% elif row.article_failures %}
+            <div role="alert" style="margin-top: 6px; max-width: 360px; font-size: var(--text-xs); color: var(--status-warning-text); word-break: break-word;">
+              {{ row.article_failures }} {{ t("articles failed") }}{% if row.article_last_error %}: {{ row.article_last_error }}{% endif %}
+            </div>
+          {% endif %}
+        </td>
+        <td>
+          <span style="font-size: var(--text-xs); color: var(--text-muted); word-break: break-all;">{{ row.base_url }}</span>
+        </td>
+        <td>
+          <div class="actions">
+            <a href="/articles?site={{ row.slug }}" class="btn btn-secondary" style="font-size: var(--text-xs); padding: 3px 8px; text-decoration: none;">{{ t("View articles") }}</a>
+            <form method="post" action="/admin/sites/{{ row.id }}/status" style="margin: 0;">
+              <input type="hidden" name="_csrf" value="{{ csrf }}">
+              <input type="hidden" name="enabled" value="{{ 0 if row.enabled else 1 }}">
+              <button type="submit" class="btn-secondary" style="font-size: var(--text-xs); padding: 3px 8px;">
+                {{ t("Disable") if row.enabled else t("Enable") }}
+              </button>
+            </form>
+            {% if row.enabled %}
+              {% if row.crawl_task and row.crawl_task.status in ('queued', 'running') %}
+              <button type="button" disabled style="font-size: var(--text-xs); padding: 3px 8px;">{{ t("Crawling") }}</button>
+              {% else %}
+              <form method="post" action="/admin/sites/{{ row.id }}/crawl" style="margin: 0;">
+                <input type="hidden" name="_csrf" value="{{ csrf }}">
+                <button type="submit" style="font-size: var(--text-xs); padding: 3px 8px;">{{ t("Crawl now") }}</button>
+              </form>
+              {% endif %}
+            {% endif %}
+          </div>
+          <details style="margin-top: 8px;">
+            <summary style="cursor: pointer; font-size: var(--text-xs); color: var(--text-muted);">{{ t("Adjust crawl frequency") }}</summary>
+            <form method="post" action="/admin/sites/{{ row.id }}/crawl-interval" class="stack" style="gap: 6px; margin-top: 8px;">
+              <input type="hidden" name="_csrf" value="{{ csrf }}">
+              <label for="crawl-interval-{{ row.id }}" style="font-size: var(--text-xs);">{{ t("Interval (minutes)") }}</label>
+              <input id="crawl-interval-{{ row.id }}" type="number" name="crawl_interval_minutes" min="1" step="1" value="{{ row.crawl_interval_sec // 60 }}" required aria-describedby="crawl-interval-help-{{ row.id }}">
+              <small id="crawl-interval-help-{{ row.id }}" style="color: var(--text-muted);">{{ t("The next due crawl is checked every minute.") }}</small>
+              <button type="submit" style="font-size: var(--text-xs);">{{ t("Save") }}</button>
+            </form>
+          </details>
+          {% if row.enabled and row.backfill_max_pages %}
+          <details style="margin-top: 8px;">
+            <summary style="cursor: pointer; font-size: var(--text-xs); color: var(--text-muted);">{{ t("Historical backfill") }}</summary>
+            <form method="post" action="/admin/sites/{{ row.id }}/crawl" class="stack" style="gap: 6px; margin-top: 8px;">
+              <input type="hidden" name="_csrf" value="{{ csrf }}">
+              <label style="font-size: var(--text-xs);">{{ t("Pages") }}
+                <input type="number" name="pages" min="1" max="{{ row.backfill_max_pages }}" value="{{ row.backfill_max_pages }}" required {% if row.crawl_task and row.crawl_task.status in ('queued', 'running') %}disabled{% endif %}>
+              </label>
+              <small style="color: var(--text-muted);">{{ t("One-time scan; the regular incremental page count stays unchanged.") }}</small>
+              <button type="submit" style="font-size: var(--text-xs);" {% if row.crawl_task and row.crawl_task.status in ('queued', 'running') %}disabled{% endif %}>{{ t("Start backfill") }}</button>
+            </form>
+          </details>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <h3>{{ t("No sites.") }}</h3>
+  <p><a href="/admin/sites/new" class="btn btn-primary" style="margin-top: 8px; text-decoration: none;">{{ t("Add a site") }}</a></p>
+</div>
+{% endif %}
+
 {% endif %}
 {% endblock %}

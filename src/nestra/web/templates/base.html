@@ -9,19 +9,93 @@
 </head>
 <body>
 <a class="skip-link" href="#content">{{ '跳到正文' if zh else 'Skip to content' }}</a>
+{% if user %}
+<div class="app-shell">
+  <aside class="app-sidebar">
+    <a class="sidebar-brand" href="/">
+      <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10M7 12h10M7 17h6"/></svg>
+      <span>Nestra</span>
+    </a>
+    <nav class="sidebar-nav" aria-label="Main navigation">
+      <div class="nav-group-title">{{ '工作台' if zh else 'Workspace' }}</div>
+      <a class="nav-link{% if request.url.path == '/' %} active{% endif %}" href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+        <span>{{ '仪表盘' if zh else 'Dashboard' }}</span>
+      </a>
+      <a class="nav-link{% if request.url.path.startswith('/articles') %} active{% endif %}" href="/articles">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10M6 10h10"/></svg>
+        <span>{{ '文章' if zh else 'Articles' }}</span>
+      </a>
+      <a class="nav-link{% if request.url.path.startswith('/subscriptions') %} active{% endif %}" href="/subscriptions">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span>{{ '订阅' if zh else 'Subscriptions' }}</span>
+      </a>
+      <a class="nav-link{% if request.url.path.startswith('/targets') %} active{% endif %}" href="/targets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        <span>{{ '通知目标' if zh else 'Targets' }}</span>
+      </a>
+
+      {% if user.role == "admin" %}
+      <div class="nav-group-title">{{ '管理' if zh else 'Admin' }}</div>
+      <a class="nav-link{% if request.url.path.startswith('/admin') %} active{% endif %}" href="/admin/users">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>{{ '管理' if zh else 'Admin' }}</span>
+      </a>
+      {% endif %}
+
+      <div class="nav-group-title">{{ '账户与偏好' if zh else 'Preferences' }}</div>
+      <a class="nav-link{% if request.url.path == '/settings' %} active{% endif %}" href="/settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>{{ '设置' if zh else 'Settings' }}</span>
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-badge">
+        <strong>{{ user.username }}</strong>
+        <span class="badge badge-neutral">{{ user.role }}</span>
+      </div>
+      <form class="logout-form" method="post" action="/logout">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <button class="logout-btn" type="submit">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+          <span>{{ '退出登录' if zh else 'Log out' }}</span>
+        </button>
+      </form>
+    </div>
+  </aside>
+  <div class="app-main">
+    <main id="content" class="content-container">
+      {% set alert_error = error or (request.query_params.get('error') if request else none) %}
+      {% if alert_error %}
+      <div class="alert alert-danger" style="margin-bottom: 16px;">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>{{ alert_error }}</span>
+      </div>
+      {% endif %}
+      {% set alert_success = success or (request.query_params.get('success') if request else none) %}
+      {% if alert_success %}
+      <div class="alert alert-success" style="margin-bottom: 16px;">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        <span>{{ alert_success }}</span>
+      </div>
+      {% endif %}
+{% else %}
 <header>
   <a class="brand" href="/">Nestra</a>
-  {% if user %}
-  <nav aria-label="Main navigation">
-    <a href="/subscriptions">{{ '订阅' if zh else 'Subscriptions' }}</a>
-    <a href="/targets">{{ '推送目标' if zh else 'Targets' }}</a>
-    <a href="/articles">{{ '文章' if zh else 'Articles' }}</a>
-    <a href="/settings">{{ '设置' if zh else 'Settings' }}</a>
-    {% if user.role == "admin" %}<a href="/admin/users">{{ '管理' if zh else 'Admin' }}</a>{% endif %}
-    <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>{{ '退出登录' if zh else 'Log out' }}</button></form>
-  </nav>
-  {% endif %}
 </header>
-<main id="content">{% block content %}{% endblock %}</main>
+<main id="content" class="auth-layout">
+  <div class="auth-card">
+{% endif %}
+
+{% block content %}{% endblock %}
+
+{% if user %}
+    </main>
+  </div>
+</div>
+{% else %}
+  </div>
+</main>
+{% endif %}
 </body>
 </html>

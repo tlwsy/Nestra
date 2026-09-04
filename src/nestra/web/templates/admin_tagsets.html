@@ -1,11 +1,130 @@
 {% extends "base.html" %}
 {% set title = t("Tagsets") %}
 {% block content %}
-<h1>{{ t("Tagsets") }}</h1>
-<nav aria-label="{{ t('Admin') }}"><a href="/admin/users">{{ t("Users") }}</a> · <a href="/admin/sites">{{ t("Sites") }}</a> · <a href="/admin/providers">{{ t("Providers") }}</a>{% if advanced %} · <a href="/admin/system">{{ t("System") }}</a>{% endif %} · <a href="/admin/audit">{{ t("Audit") }}</a></nav>
-<p>{{ t("Builds run in the background. Manual review is optional unless the group requires it.") }}</p>
-<h2>{{ t("Create group") }}</h2>
-<form method="post" action="/admin/tagset/groups"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Slug") }} <input name="slug" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label><label>{{ t("Name") }} <input name="name" required></label><label>{{ t("Description") }} <input name="description"></label><label>{{ t("Build mode") }} <select name="build_mode"><option value="llm">{{ t("Direct LLM") }}</option><option value="embedding">{{ t("Embedding (offline extra required)") }}</option></select></label><button>{{ t("Create group") }}</button></form>
-{% for row in rows %}<section><h2>{{ row.name }}</h2><p><code>{{ row.slug }}</code> · {{ row.status }} · {{ row.tags }} {{ t("Tags") }} · {{ t("version") }} {{ row.tagset_version or t("none") }}</p><form method="post" action="/admin/tagset/build"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="group" value="{{ row.slug }}"><label>{{ t("Mode") }} <select name="mode"><option value="llm">{{ t("Direct LLM") }}</option><option value="embedding">{{ t("Embedding + clustering (offline extra required)") }}</option></select></label><label><input type="checkbox" name="require_manual_review" value="1"> {{ t("Require review before freezing") }}</label><button>{{ t("Build") }}</button></form><p><a href="/admin/tagset/{{ row.slug }}/report">{{ t("Review report") }}</a></p><form method="post" action="/admin/tagset/{{ row.slug }}/freeze"><input type="hidden" name="_csrf" value="{{ csrf }}"><label><input type="checkbox" name="confirm" value="1" required> {{ t("I reviewed the draft") }}</label><button>{{ t("Freeze draft") }}</button></form></section>
-{% else %}<p>{{ t("No tagset groups.") }}</p>{% endfor %}
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Tagsets") }}</h1>
+    <p>{{ "自动化诱导、聚类提取、知识标签集构建与版本冻结管理" if zh else "Induction, clustering extraction, taxonomy builds and frozen version control." }}</p>
+  </div>
+</div>
+
+<nav aria-label="{{ t('Admin') }}" class="sub-nav">
+  <a href="/admin/users">{{ t("Users") }}</a>
+  <span>·</span>
+  <a href="/admin/sites">{{ t("Sites") }}</a>
+  <span>·</span>
+  <a href="/admin/tagset" class="active">{{ t("Tagsets") }}</a>
+  <span>·</span>
+  <a href="/admin/providers">{{ t("Providers") }}</a>
+  {% if advanced %}
+  <span>·</span>
+  <a href="/admin/system">{{ t("System") }}</a>
+  {% endif %}
+  <span>·</span>
+  <a href="/admin/audit">{{ t("Audit") }}</a>
+</nav>
+
+<details class="card" style="margin-bottom: 24px;" open>
+  <summary style="cursor: pointer; font-weight: 600; font-size: var(--text-md); list-style: none; display: flex; align-items: center; justify-content: space-between;">
+    <span style="display: flex; align-items: center; gap: 8px;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      {{ t("Create group") }}
+    </span>
+    <span style="font-size: var(--text-xs); color: var(--text-muted); font-weight: normal;">{{ "点击收起/展开表单" if zh else "Toggle form" }}</span>
+  </summary>
+  <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+    <p style="margin: 0 0 12px; font-size: var(--text-xs); color: var(--text-muted);">{{ t("Builds run in the background. Manual review is optional unless the group requires it.") }}</p>
+    <form method="post" action="/admin/tagset/groups" class="stack">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <div class="form-grid">
+        <label>{{ t("Slug") }} <input type="text" name="slug" pattern="[a-z0-9][a-z0-9-]{0,62}" required placeholder="tech-trends"></label>
+        <label>{{ t("Name") }} <input type="text" name="name" required placeholder="Technology Trends"></label>
+        <label>{{ t("Description") }} <input type="text" name="description" placeholder="AI, cloud, devops taxonomy"></label>
+        <label>{{ t("Build mode") }}
+          <select name="build_mode">
+            <option value="llm">{{ t("Direct LLM") }}</option>
+            <option value="embedding">{{ t("Embedding (offline extra required)") }}</option>
+          </select>
+        </label>
+      </div>
+      <div>
+        <button type="submit">{{ t("Create group") }}</button>
+      </div>
+    </form>
+  </div>
+</details>
+
+<div class="page-header" style="margin-top: 32px; border-bottom: none; padding-bottom: 0;">
+  <h2>{{ t("Tagsets") }}</h2>
+</div>
+
+{% for row in rows %}
+<section class="card" style="margin-bottom: 20px;">
+  <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border-subtle);">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <h2 style="margin: 0; font-size: var(--text-md);">{{ row.name }}</h2>
+      <code>{{ row.slug }}</code>
+      {% if row.status == 'frozen' %}
+        <span class="badge badge-success">{{ row.status }}</span>
+      {% elif row.status == 'draft' %}
+        <span class="badge badge-warning">{{ row.status }}</span>
+      {% else %}
+        <span class="badge badge-neutral">{{ row.status }}</span>
+      {% endif %}
+      <span class="badge badge-neutral">{{ row.tags }} {{ t("Tags") }}</span>
+      <span class="badge badge-neutral">{{ t("version") }} {{ row.tagset_version or t("none") }}</span>
+    </div>
+    <div>
+      <a href="/admin/tagset/{{ row.slug }}/report" class="btn btn-secondary" style="font-size: var(--text-xs); text-decoration: none; padding: 4px 10px;">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span>{{ t("Review report") }}</span>
+      </a>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start;">
+    <div style="background: var(--bg-surface-subtle); padding: 14px; border-radius: var(--radius-xs); border: 1px solid var(--border-subtle);">
+      <h3 style="font-size: var(--text-sm); margin-top: 0; margin-bottom: 10px;">{{ t("Tagset build") if not zh else "触发构建" }}</h3>
+      <form method="post" action="/admin/tagset/build" class="stack">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <input type="hidden" name="group" value="{{ row.slug }}">
+        <label>{{ t("Mode") }}
+          <select name="mode">
+            <option value="llm">{{ t("Direct LLM") }}</option>
+            <option value="embedding">{{ t("Embedding + clustering (offline extra required)") }}</option>
+          </select>
+        </label>
+        <label>
+          <input type="checkbox" name="require_manual_review" value="1">
+          <span>{{ t("Require review before freezing") }}</span>
+        </label>
+        <div>
+          <button type="submit" class="btn-secondary" style="font-size: var(--text-xs); padding: 4px 12px;">{{ t("Build") }}</button>
+        </div>
+      </form>
+    </div>
+
+    <div style="background: var(--bg-surface-subtle); padding: 14px; border-radius: var(--radius-xs); border: 1px solid var(--border-subtle);">
+      <h3 style="font-size: var(--text-sm); margin-top: 0; margin-bottom: 10px;">{{ "冻结版本发布" if zh else "Freeze Release" }}</h3>
+      <p style="font-size: var(--text-xs); color: var(--text-muted); margin: 0 0 12px;">
+        {{ "冻结后标签集将正式生效并应用到文章自动分类管道中。" if zh else "Freezing commits the taxonomy draft into the active classification engine." }}
+      </p>
+      <form method="post" action="/admin/tagset/{{ row.slug }}/freeze" class="stack">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <label>
+          <input type="checkbox" name="confirm" value="1" required>
+          <span>{{ t("I reviewed the draft") }}</span>
+        </label>
+        <div>
+          <button type="submit" style="font-size: var(--text-xs); padding: 4px 12px;">{{ t("Freeze draft") }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+{% else %}
+<div class="empty-state">
+  <h3>{{ t("No tagset groups.") }}</h3>
+</div>
+{% endfor %}
 {% endblock %}

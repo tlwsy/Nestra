@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, replace
+from html import escape
+from io import BytesIO
+
+from pypdf import PdfReader
 
 from ..core.config import Settings
-from ..core.errors import ContentRejected, CrawlError, NotFound
+from ..core.errors import ContentRejected, ContentTooShort, CrawlError, NotFound
+from ..core.models import ArticleText
 from ..core.time import from_iso, now
 from ..extractor.article import extract_article
 from ..extractor.dedupe import simhash
+from ..extractor.sanitize import sanitize_html
 from ..storage.db import Database
 from ..storage.repositories.articles import ArticleRepository
 from ..storage.repositories.fetch_cache import FetchCacheRepository
@@ -30,6 +37,53 @@ class CrawlStats:
     unchanged: int = 0
     skipped: int = 0
     failed: int = 0
+
+
+def _extract_pdf_text(content: bytes) -> str:
+    return "\n\n".join(
+        text
+        for page in PdfReader(BytesIO(content)).pages
+        if (text := (page.extract_text() or "").strip())
+    )
+
+
+async def _hydrate_pdf_body(
+    article: ArticleText,
+    fetcher,
+    article_url: str,
+    *,
+    min_content_length: int,
+    max_bytes: int,
+    send_referer: bool,
+) -> ArticleText:
+    body_pdfs = [item for item in article.attachments if item.is_body]
+    if not body_pdfs:
+        return article
+    fetch_bytes = getattr(fetcher, "fetch_bytes", None)
+    if fetch_bytes is None:
+        raise CrawlError("当前渲染器不支持提取 PDF 正文")
+    headers = {"Referer": article_url} if send_referer else {}
+    texts = []
+    for item in body_pdfs:
+        response = await fetch_bytes(item.source_url, headers=headers, max_bytes=max_bytes)
+        if text := await asyncio.to_thread(_extract_pdf_text, response.content):
+            texts.append(text)
+    content_text = "\n\n".join(texts)
+    if len(content_text) < min_content_length:
+        raise ContentTooShort(f"PDF 正文仅 {len(content_text)} 字符: {article_url}")
+    links = "".join(
+        f'<li><a href="{escape(item.source_url, quote=True)}">'
+        f"{escape(item.filename or '正文 PDF')}</a></li>"
+        for item in body_pdfs
+    )
+    return replace(
+        article,
+        content_text=content_text,
+        content_html=sanitize_html(
+            f"<pre>{escape(content_text)}</pre><p>原始正文：</p><ul>{links}</ul>",
+            base_url=article_url,
+        ),
+    )
 
 
 async def crawl_site(
@@ -131,6 +185,14 @@ async def crawl_site(
                     attachment_config=(site.attachments if settings.attachments.enabled else None),
                     max_attachments=settings.attachments.max_per_article,
                 )
+                article = await _hydrate_pdf_body(
+                    article,
+                    fetcher,
+                    final_url,
+                    min_content_length=site.extract.min_content_length,
+                    max_bytes=settings.attachments.max_size_mb * 1024**2,
+                    send_referer=site.attachments.send_referer,
+                )
                 fingerprint = simhash(article.content_text)
                 duplicate = articles.save_extracted(row.id, article, fingerprint) if row else None
                 if duplicate:
@@ -160,8 +222,7 @@ async def crawl_site(
                 if dry_run:
                     print(f"{canonical}\n  ERROR {type(exc).__name__}: {exc}")
         if db is not None and not dry_run:
-            error = CrawlError(f"{stats.failed} article(s) failed") if stats.failed else None
-            record_crawl(db, stored.id, error)
+            record_crawl(db, stored.id)
     finally:
         if owned:
             await fetcher.close()

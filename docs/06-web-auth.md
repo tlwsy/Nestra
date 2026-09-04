@@ -191,7 +191,7 @@ htmx 表单提交需 CSRF 防护：Double Submit Cookie 或服务端 token。
 
 | 机密 | 存放 | 说明 |
 |---|---|---|
-| LLM API key | **环境变量**，不入库不入 YAML | YAML 只写变量名 |
+| LLM API key | Web 添加时加密入库；YAML 添加时读取环境变量 | 密钥不写入 YAML，网页密文可编辑或删除 |
 | 应用主密钥 | 环境变量 `NESTRA_SECRET_KEY` | 用于字段加密与签名 |
 | 用户 Apprise URL | DB，用主密钥加密 | 用户自己填的，必须能读回来发送 |
 

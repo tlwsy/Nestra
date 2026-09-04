@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import gzip
+
 import httpx
 import pytest
 
@@ -79,6 +81,23 @@ def test_dns_is_pinned_while_host_header_is_preserved() -> None:
     assert seen[0].url.host == PUBLIC_V4
     assert seen[0].headers["host"] == "news.example"
     assert seen[0].extensions["sni_hostname"] == "news.example"
+
+
+def test_compressed_response_is_decoded_once() -> None:
+    body = b"<html><body>compressed</body></html>"
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            headers={"content-encoding": "gzip", "content-type": "text/html; charset=utf-8"},
+            content=gzip.compress(body),
+        )
+    )
+
+    page = SafeFetcher(resolver=public_resolver, transport=transport).fetch(
+        "https://public.example/"
+    )
+
+    assert page.content == body
 
 
 def test_redirect_target_is_validated_before_second_request() -> None:

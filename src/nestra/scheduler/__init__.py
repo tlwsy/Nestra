@@ -40,7 +40,8 @@ class PipelineScheduler:
         )
         interval = settings.schedule
         jobs = (
-            (crawl_sites, interval.crawl_default_interval_sec, "crawl"),
+            # crawl_sites applies each site's interval; this only checks which sites are due.
+            (crawl_sites, min(interval.crawl_default_interval_sec, 60), "crawl"),
             (download_attachments, interval.dispatch_interval_sec, "attachments"),
             (tag_articles, interval.tag_interval_sec, "tag"),
             (dispatch_notifications, interval.dispatch_interval_sec, "match"),

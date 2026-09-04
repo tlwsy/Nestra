@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% set title = title or (status_code|string ~ " " ~ t("Error")) %}
+{% block content %}
+<div class="empty-state" style="padding: 48px 24px; max-width: 540px; margin: 40px auto; text-align: center;">
+  <div style="display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 50%; background: var(--status-danger-bg); color: var(--status-danger-text); border: 1px solid var(--status-danger-border); margin-bottom: 20px;">
+    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+  </div>
+  <div style="font-family: var(--font-mono); font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 8px;">
+    HTTP {{ status_code }}
+  </div>
+  <h1 style="font-size: 1.5rem; font-weight: 700; margin: 0 0 10px; color: var(--text-primary);">
+    {{ title }}
+  </h1>
+  <p style="font-size: var(--text-sm); color: var(--text-secondary); margin: 0 0 24px; line-height: 1.6;">
+    {{ detail or t("An error occurred") }}
+  </p>
+  <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+    {% if user %}
+      <a href="/" class="btn btn-primary">{{ t("Back to Dashboard") }}</a>
+      <button type="button" class="btn btn-secondary" onclick="window.history.back()">{{ t("Go back") }}</button>
+    {% else %}
+      <a href="/login" class="btn btn-primary">{{ t("Return to login") }}</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

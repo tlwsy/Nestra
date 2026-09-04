@@ -68,8 +68,8 @@ class Dispatcher:
 
     def _load(self, delivery_id: int):
         return self.db.query_one(
-            "SELECT d.*,s.include_attachments,s.user_id,a.title,a.content_text,a.url,"
-            "a.published_at,"
+            "SELECT d.*,s.include_attachments,s.user_id,a.title,a.content_text,a.summary,"
+            "a.summary_backend,a.url,a.published_at,"
             "si.name AS site_name,t.apprise_url_enc,t.url_fingerprint,"
             "t.enabled AS target_enabled,t.consecutive_failures AS target_failures "
             "FROM deliveries d JOIN subscriptions s ON s.id=d.subscription_id "
@@ -140,6 +140,7 @@ class Dispatcher:
             published_at=from_iso(row["published_at"]),
             tags=tags,
             content=row["content_text"] or "",
+            summary=row["summary"] if row["summary_backend"] else None,
             attachments=attachments if row["include_attachments"] else [],
             timezone=self.timezone,
             requested_format=self.body_format,

@@ -10,10 +10,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from nestra.core.config import load_settings
 from nestra.core.crypto import Crypto, hash_password, new_token
@@ -31,9 +32,10 @@ from nestra.tagger.tagset import load_tagset
 from .api.admin import router as admin_router
 from .api.auth import router as auth_router
 from .api.user import router as user_router
+from .deps import wants_json
 from .i18n import translate
 from .middleware import RequestBodyLimitMiddleware
-from .security import RateLimiter, client_ip, request_is_https, validate_password
+from .security import RateLimiter, client_ip, csrf_token, request_is_https, validate_password
 
 DEFAULT_CONFIG_PATH = Path("config/config.yaml")
 WEB_DIR = Path(__file__).parent
@@ -132,6 +134,7 @@ def create_app(config_path: Path | str | None = None, *, strict_config: bool = T
             app.state.config_path = path
             app.state.limiter = RateLimiter()
             app.state.probe_tasks = {}
+            app.state.crawl_tasks = {}
             app.state.tagset_tasks = {}
             app.state.fake_password_hash = hash_password(new_token())
             _bootstrap_admin(app)
@@ -206,6 +209,52 @@ def create_app(config_path: Path | str | None = None, *, strict_config: bool = T
             get_logger(__name__).error("healthcheck_failed", error_type=type(exc).__name__)
             return JSONResponse(status_code=503, content={"status": "unavailable"})
         return JSONResponse({"status": "ok"})
+
+    @application.exception_handler(HTTPException)
+    @application.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException | StarletteHTTPException):
+        if wants_json(request) or request.headers.get("content-type", "").startswith("application/json"):
+            return JSONResponse(
+                {"detail": exc.detail},
+                status_code=exc.status_code,
+                headers=exc.headers,
+            )
+
+        if exc.status_code == 401 and request.method == "GET":
+            return RedirectResponse("/login", status_code=303)
+
+        zh = request.cookies.get("nestra_locale") == "zh"
+        title_map = {
+            400: ("请求无效", "Bad Request"),
+            401: ("未授权", "Unauthorized"),
+            403: ("无权访问", "Forbidden"),
+            404: ("页面未找到", "Not Found"),
+            409: ("状态冲突", "Conflict"),
+            429: ("请求过于频繁", "Too Many Requests"),
+            500: ("服务器错误", "Internal Server Error"),
+            502: ("网关错误", "Bad Gateway"),
+        }
+        titles = title_map.get(exc.status_code, ("发生错误", "Error"))
+        title_text = titles[0] if zh else titles[1]
+        user = getattr(request.state, "user", None)
+        token = ""
+        if hasattr(application.state, "crypto"):
+            try:
+                token = csrf_token(application.state.crypto)
+            except Exception:
+                token = ""
+        return application.state.templates.TemplateResponse(
+            request=request,
+            name="error.html",
+            context={
+                "title": f"{exc.status_code} {title_text}",
+                "status_code": exc.status_code,
+                "detail": str(exc.detail),
+                "user": user,
+                "csrf": token,
+            },
+            status_code=exc.status_code,
+        )
 
     application.include_router(auth_router)
     application.include_router(admin_router)

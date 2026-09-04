@@ -343,6 +343,144 @@ async def test_site_confirmation_requires_matching_completed_dryrun(
     assert r"download\\.jsp" in json.loads(stored["config_json"])["attachments"]["link_patterns"]
 
 
+async def test_manual_crawl_records_completion(web, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nestra.crawler.service import CrawlStats
+
+    app, client = web
+    csrf = await login(client, "admin")
+    created = await client.post(
+        "/admin/sites?format=json",
+        json={
+            "slug": "manual",
+            "name": "Manual",
+            "base_url": "https://example.test",
+            "tagset_group": "test",
+            "enabled": True,
+            "discovery_mode": "rss",
+            "config": {"feed_url": "https://example.test/feed"},
+        },
+        headers={"x-csrf-token": csrf},
+    )
+
+    async def fake_crawl(*_args, **_kwargs):
+        return CrawlStats(discovered=2, extracted=1)
+
+    monkeypatch.setattr("nestra.web.api.admin.crawl_site", fake_crawl)
+    response = await client.post(
+        f"/admin/sites/{created.json()['id']}/crawl?format=json",
+        json={},
+        headers={"x-csrf-token": csrf},
+    )
+
+    assert response.json() == {"queued": True, "status": "queued", "kind": "crawl"}
+    assert app.state.crawl_tasks[created.json()["id"]]["status"] == "done"
+    assert app.state.crawl_tasks[created.json()["id"]]["result"]["extracted"] == 1
+
+
+async def test_web_backfill_is_bounded_and_does_not_change_site_config(
+    web, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nestra.crawler.service import CrawlStats
+    from nestra.storage.repositories.sites import get_site
+
+    app, client = web
+    csrf = await login(client, "admin")
+    created = await client.post(
+        "/admin/sites?format=json",
+        json={
+            "slug": "history",
+            "name": "History",
+            "base_url": "https://example.test",
+            "tagset_group": "test",
+            "enabled": True,
+            "discovery_mode": "html_list",
+            "config": {
+                "list_urls": ["https://example.test/news"],
+                "item_selector": "article",
+                "pagination": {
+                    "mode": "url_template",
+                    "template": "https://example.test/news/{page}",
+                    "order": "desc_index",
+                    "max_page": 78,
+                    "max_pages": 1,
+                },
+            },
+        },
+        headers={"x-csrf-token": csrf},
+    )
+    page = await client.get("/admin/sites")
+    assert "Historical backfill" in page.text
+    assert 'name="pages" min="1" max="78"' in page.text
+    assert "/articles?site=history" in page.text
+    seen = {}
+
+    async def fake_crawl(_settings, _db, stored):
+        seen["pages"] = stored.config.discovery.pagination.max_pages
+        seen["conditional"] = stored.config.politeness.conditional_requests
+        return CrawlStats(discovered=30, extracted=15)
+
+    monkeypatch.setattr("nestra.web.api.admin.crawl_site", fake_crawl)
+    site_id = created.json()["id"]
+    rejected = await client.post(
+        f"/admin/sites/{site_id}/crawl?format=json",
+        json={"pages": 79},
+        headers={"x-csrf-token": csrf},
+    )
+    assert rejected.status_code == 400
+    response = await client.post(
+        f"/admin/sites/{site_id}/crawl?format=json",
+        json={"pages": 78},
+        headers={"x-csrf-token": csrf},
+    )
+
+    assert response.json() == {"queued": True, "status": "queued", "kind": "backfill"}
+    assert seen == {"pages": 78, "conditional": False}
+    assert app.state.crawl_tasks[site_id]["pages"] == 78
+    assert get_site(app.state.db, "history").config.discovery.pagination.max_pages == 1
+    audit_row = app.state.db.query_one(
+        "SELECT action,detail FROM audit_log WHERE target_type='site' AND target_id=? "
+        "ORDER BY id DESC LIMIT 1",
+        (site_id,),
+    )
+    assert tuple(audit_row) == ("admin.site_backfill", "pages=78")
+
+
+async def test_admin_can_view_undelivered_crawled_articles(web) -> None:
+    app, client = web
+    await login(client, "admin")
+    timestamp = now_iso()
+    group_id = app.state.db.query_one("SELECT id FROM tagset_groups WHERE slug='test'")[0]
+    site_id = app.state.db.execute(
+        "INSERT INTO sites (slug,name,base_url,discovery_mode,tagset_group_id,config_json,"
+        "created_at,updated_at) VALUES ('raw','Raw','https://example.test','rss',?,'{}',?,?)",
+        (group_id, timestamp, timestamp),
+    ).lastrowid
+    article_id = app.state.db.execute(
+        "INSERT INTO articles (site_id,url,url_hash,title,content_html,status,discovered_at) "
+        "VALUES (?,?,?,'Raw result','<p onclick=bad()>safe</p><script>bad()</script>',"
+        "'EXTRACTED',?)",
+        (site_id, "https://example.test/raw", "raw-hash", timestamp),
+    ).lastrowid
+
+    listing = await client.get("/articles")
+    detail = await client.get(f"/articles/{article_id}")
+
+    assert "Raw result" in listing.text and "EXTRACTED" in listing.text
+    assert "safe" in detail.text and "<script" not in detail.text and "onclick" not in detail.text
+
+    app.state.db.execute(
+        "INSERT INTO users (username,password_hash,role,created_at,updated_at) "
+        "VALUES ('viewer',?,'user',?,?)",
+        (hash_password(PASSWORD), timestamp, timestamp),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as viewer:
+        await login(viewer, "viewer")
+        assert "Raw result" not in (await viewer.get("/articles")).text
+        assert (await viewer.get(f"/articles/{article_id}")).status_code == 404
+
+
 async def test_admin_created_user_must_change_temporary_password(web) -> None:
     app, client = web
     csrf = await login(client, "admin")

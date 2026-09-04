@@ -192,6 +192,46 @@ async def test_invalid_output_gets_one_correction_then_falls_back(
 
 
 @respx.mock
+async def test_summary_uses_selected_backend_before_tagging(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    article_id = _seed_article(db)
+    monkeypatch.setenv("P1_API_KEY", "tag-key")
+    monkeypatch.setenv("P2_API_KEY", "summary-key")
+    db.execute(
+        "UPDATE ai_summary_settings SET enabled=1,provider='p2',model='summary-model' WHERE id=1"
+    )
+    calls: list[tuple[str, str]] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append((request.url.host, body["model"]))
+        if body["model"] == "summary-model":
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": '{"summary":"AI 摘要"}'}}]},
+            )
+        return _ok()
+
+    respx.post(url__regex=r"https://p[12]\.test/v1/chat/completions").mock(side_effect=answer)
+    chain = TaggerChain(
+        _config([("p1", ["tag-model"]), ("p2", ["summary-model"])]), db
+    )
+    try:
+        await chain.tag_article(article_id, _article(), _tagset())
+    finally:
+        await chain.aclose()
+
+    assert calls == [("p2.test", "summary-model"), ("p1.test", "tag-model")]
+    row = db.query_one(
+        "SELECT status,summary,summary_backend,summarized_at FROM articles WHERE id=?",
+        (article_id,),
+    )
+    assert tuple(row[:3]) == ("TAGGED", "AI 摘要", "p2:summary-model")
+    assert row["summarized_at"]
+
+
+@respx.mock
 async def test_all_fail_keeps_article_extracted(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:

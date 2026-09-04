@@ -32,7 +32,7 @@ from nestra.onboarding.dryrun import DryRunLimits, preview_site
 from nestra.onboarding.probe import ProbeLimits, probe_site
 from nestra.onboarding.ssrf import resolve_url
 from nestra.storage.files import attachment_path
-from nestra.storage.repositories.providers import web_providers
+from nestra.storage.repositories.providers import runtime_providers
 from nestra.storage.repositories.sites import get_site
 from nestra.tagger.bootstrap import BootstrapOptions, NativeLLMInducer, bootstrap_tagset
 from nestra.tagger.bootstrap.freeze import freeze_tagset
@@ -309,6 +309,7 @@ def _site_data(data: dict) -> SiteConfig:
                         "tagset_group",
                         "enabled",
                         "crawl_interval_sec",
+                        "crawl_interval_minutes",
                         "render_js",
                         "discovery_mode",
                         "config",
@@ -357,8 +358,10 @@ def _site_data(data: dict) -> SiteConfig:
             "base_url": data.get("base_url"),
             "tagset_group": data.get("tagset_group"),
             "enabled": bool(flag(data.get("enabled", False))),
-            "crawl_interval_sec": integer(
-                data.get("crawl_interval_sec", 1800), "crawl_interval_sec"
+            "crawl_interval_sec": (
+                integer(data["crawl_interval_minutes"], "crawl interval") * 60
+                if "crawl_interval_minutes" in data
+                else integer(data.get("crawl_interval_sec", 1800), "crawl_interval_sec")
             ),
             "render_js": bool(flag(data.get("render_js", False))),
             "discovery_mode": data.get("discovery_mode"),
@@ -380,17 +383,32 @@ async def sites(request: Request, user: AdminUser):
         dict(row)
         for row in request.app.state.db.query(
             "SELECT s.id,s.slug,s.name,s.base_url,s.discovery_mode,g.slug AS tagset_group,s.enabled,"
-            "s.last_crawled_at,s.last_error,s.consecutive_failures FROM sites s "
+            "s.crawl_interval_sec,s.last_crawled_at,s.last_error,s.consecutive_failures,"
+            "(SELECT COUNT(*) FROM articles a WHERE a.site_id=s.id AND a.status='FAILED') "
+            "AS article_failures,"
+            "(SELECT a.last_error FROM articles a WHERE a.site_id=s.id AND a.status='FAILED' "
+            "ORDER BY a.id DESC LIMIT 1) AS article_last_error FROM sites s "
             "JOIN tagset_groups g ON g.id=s.tagset_group_id ORDER BY s.id"
         )
     ]
+    for row in rows:
+        row["crawl_task"] = request.app.state.crawl_tasks.get(row["id"])
+        row["backfill_max_pages"] = None
+        try:
+            stored = get_site(request.app.state.db, row["slug"])
+            pagination = getattr(stored.config.discovery, "pagination", None) if stored else None
+            if pagination is not None and pagination.mode != "none":
+                row["backfill_max_pages"] = min(pagination.max_page or 500, 500)
+                row["incremental_pages"] = pagination.max_pages
+        except Exception as exc:
+            log.warning("site_backfill_unavailable", site=row["slug"], error=safe_error(exc))
     if wants_json(request):
         return rows
     groups = [
         dict(row)
         for row in request.app.state.db.query("SELECT slug,name FROM tagset_groups ORDER BY name")
     ]
-    return _page(
+    response = _page(
         request,
         "Sites",
         rows,
@@ -399,6 +417,9 @@ async def sites(request: Request, user: AdminUser):
         groups=groups,
         onboarding=False,
     )
+    if any(row["crawl_task"] and row["crawl_task"]["status"] in {"queued", "running"} for row in rows):
+        response.headers["Refresh"] = "2; url=/admin/sites"
+    return response
 
 
 @router.get("/sites/new")
@@ -568,13 +589,51 @@ async def set_site_status(site_id: int, request: Request, user: AdminUser):
     return RedirectResponse("/admin/sites", 303)
 
 
-async def _crawl_site_now(app, slug: str) -> None:
-    stored = get_site(app.state.db, slug)
-    if stored is not None and stored.config.enabled:
-        try:
-            await crawl_site(app.state.settings, app.state.db, stored)
-        except Exception as exc:
-            log.warning("manual_crawl_failed", site=slug, error_type=type(exc).__name__)
+@router.post("/sites/{site_id:int}/crawl-interval")
+async def set_site_crawl_interval(site_id: int, request: Request, user: AdminUser):
+    data = await request_data(request)
+    write_guard(request, data, user)
+    seconds = integer(data.get("crawl_interval_minutes"), "crawl interval") * 60
+    cursor = request.app.state.db.execute(
+        "UPDATE sites SET crawl_interval_sec=?,updated_at=? WHERE id=?",
+        (seconds, now_iso(), site_id),
+    )
+    if cursor.rowcount != 1:
+        raise HTTPException(404)
+    audit(
+        request.app.state.db,
+        "admin.site_crawl_interval",
+        request=request,
+        user_id=user["id"],
+        target_type="site",
+        target_id=site_id,
+        detail=f"{seconds}s",
+    )
+    if wants_json(request):
+        return {"ok": True, "crawl_interval_sec": seconds}
+    return RedirectResponse("/admin/sites", 303)
+
+
+async def _crawl_site_now(app, site_id: int, slug: str, pages: int | None = None) -> None:
+    task = app.state.crawl_tasks[site_id]
+    task["status"] = "running"
+    try:
+        stored = get_site(app.state.db, slug)
+        if stored is None:
+            raise RuntimeError("site no longer exists")
+        if pages is not None:
+            pagination = getattr(stored.config.discovery, "pagination", None)
+            if pagination is None or pagination.mode == "none":
+                raise ValueError("site discovery has no pagination")
+            pagination.max_pages = pages
+            stored.config.politeness.conditional_requests = False
+        stats = await crawl_site(app.state.settings, app.state.db, stored)
+        task.update(status="done", result=dataclasses.asdict(stats))
+    except Exception as exc:
+        task.update(status="failed", error=safe_error(exc))
+        log.warning("manual_crawl_failed", site=slug, error=safe_error(exc), exc_info=True)
+    finally:
+        task["finished_at"] = now_iso()
 
 
 @router.post("/sites/{site_id:int}/crawl")
@@ -591,18 +650,42 @@ async def crawl_site_now(
         raise HTTPException(404)
     if not row["enabled"]:
         raise HTTPException(409, "site is disabled")
+    pages = integer(data["pages"], "pages") if str(data.get("pages", "")).strip() else None
+    if pages is not None:
+        if pages > 500:
+            raise HTTPException(400, "pages must be between 1 and 500")
+        stored = get_site(request.app.state.db, row["slug"])
+        pagination = getattr(stored.config.discovery, "pagination", None) if stored else None
+        if pagination is None or pagination.mode == "none":
+            raise HTTPException(409, "site discovery has no pagination")
+        if pagination.max_page and pages > pagination.max_page:
+            raise HTTPException(400, f"site has at most {pagination.max_page} pages")
+    current = request.app.state.crawl_tasks.get(site_id)
+    if current and current["status"] in {"queued", "running"}:
+        if wants_json(request):
+            raise HTTPException(409, "crawl already running")
+        return RedirectResponse("/admin/sites", 303)
     request.app.state.limiter.check("site-crawl", str(user["id"]), 3, 60)
-    background.add_task(_crawl_site_now, request.app, row["slug"])
+    task = {
+        "status": "queued",
+        "kind": "backfill" if pages is not None else "crawl",
+        "created_at": now_iso(),
+    }
+    if pages is not None:
+        task["pages"] = pages
+    request.app.state.crawl_tasks[site_id] = task
+    background.add_task(_crawl_site_now, request.app, site_id, row["slug"], pages)
     audit(
         request.app.state.db,
-        "admin.site_crawl",
+        "admin.site_backfill" if pages is not None else "admin.site_crawl",
         request=request,
         user_id=user["id"],
         target_type="site",
         target_id=site_id,
+        detail=f"pages={pages}" if pages is not None else None,
     )
     if wants_json(request):
-        return {"queued": True}
+        return {"queued": True, "status": "queued", "kind": task["kind"]}
     return RedirectResponse("/admin/sites", 303)
 
 
@@ -636,7 +719,8 @@ def _run_probe(app, task_id: str, url: str, user_id: int) -> None:
             ),
         )
     except Exception as exc:
-        task.update(status="failed", error=type(exc).__name__)
+        task.update(status="failed", error=safe_error(exc))
+        log.warning("site_probe_failed", error=safe_error(exc), exc_info=True)
     task["user_id"] = user_id
 
 
@@ -673,7 +757,8 @@ async def _run_dryrun(app, task_id: str, site: SiteConfig, user_id: int) -> None
         )
         task.update(status="done", result=dataclasses.asdict(report))
     except Exception as exc:
-        task.update(status="failed", error=type(exc).__name__)
+        task.update(status="failed", error=safe_error(exc))
+        log.warning("site_dryrun_failed", error=safe_error(exc), exc_info=True)
     finally:
         await fetcher.close()
     task["user_id"] = user_id
@@ -726,9 +811,11 @@ def _site_task(request: Request, task_id: str, user: dict) -> dict:
 
 @router.get("/sites/task")
 async def site_task(task_id: str, request: Request, user: AdminUser):
-    """Browser-friendly task output without internal error details."""
+    """Browser-friendly task output with bounded, scrubbed failure details."""
     task = _site_task(request, task_id, user)
     response = {"status": task.get("status")}
+    if task.get("status") == "failed":
+        response["error"] = task.get("error", "task failed")
     if task.get("status") != "done":
         return response
     if task.get("kind") == "dryrun":
@@ -880,6 +967,7 @@ async def picker(request: Request, user: AdminUser):
             "dryrun_done": dryrun_done,
             "config_hash": task.get("config_hash", "") if task else "",
             "summary_status": summary["Status"],
+            "task_error": summary.get("Error"),
             "groups": groups,
         },
         headers=response_headers,
@@ -892,10 +980,11 @@ async def _run_tagset_build(app, task_id: str, options: BootstrapOptions) -> Non
     try:
         timeout = httpx.Timeout(app.state.settings.tagger.llm.request_timeout_sec)
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            providers = [
-                *app.state.settings.tagger.llm.providers,
-                *web_providers(app.state.db, Crypto(app.state.settings.secret_key)),
-            ]
+            providers = runtime_providers(
+                app.state.settings.tagger.llm.providers,
+                app.state.db,
+                Crypto(app.state.settings.secret_key),
+            )
             inducer = NativeLLMInducer(providers, client)
             result = await bootstrap_tagset(
                 app.state.db,
@@ -1077,34 +1166,151 @@ async def tagsets(request: Request, user: AdminUser):
 
 @router.get("/providers")
 async def providers(request: Request, user: AdminUser):
-    rows = []
+    health = {}
     for row in request.app.state.db.query(
-        "SELECT p.id,p.name,p.type,p.base_url,p.models_json,p.max_input_chars,p.created_at,"
-        "h.consecutive_failures,h.cooldown_until,h.last_error,h.total_calls,h.total_failures "
-        "FROM llm_providers p LEFT JOIN provider_health h ON h.provider=p.name ORDER BY p.id"
+        "SELECT provider,consecutive_failures,cooldown_until,last_error,total_calls,total_failures "
+        "FROM provider_health"
     ):
         item = dict(row)
+        health[item.pop("provider")] = item
+    empty_health = {
+        "consecutive_failures": 0,
+        "cooldown_until": None,
+        "last_error": None,
+        "total_calls": 0,
+        "total_failures": 0,
+    }
+    stored = [
+        dict(row)
+        for row in request.app.state.db.query(
+            "SELECT id,name,type,base_url,models_json,max_input_chars,created_at "
+            "FROM llm_providers ORDER BY id"
+        )
+    ]
+    stored_names = {item["name"] for item in stored}
+    rows = [
+        {
+            "id": None,
+            "name": provider.name,
+            "type": provider.type,
+            "base_url": provider.base_url,
+            "models": provider.models,
+            "max_input_chars": provider.max_input_chars,
+            "created_at": None,
+            "source": "configuration",
+            "api_key_env": provider.api_key_env,
+            "api_key_configured": bool(provider.api_key),
+            **empty_health,
+            **health.get(provider.name, {}),
+        }
+        for provider in request.app.state.settings.tagger.llm.providers
+        if provider.name not in stored_names
+    ]
+    for item in stored:
         item["models"] = json.loads(item.pop("models_json"))
+        item.update(
+            {
+                "source": "web",
+                "api_key_configured": True,
+                **empty_health,
+                **health.get(item["name"], {}),
+            }
+        )
         rows.append(item)
-    return (
-        rows
-        if wants_json(request)
-        else _page(request, "Providers", rows, user, template="admin_providers.html")
+    if wants_json(request):
+        return rows
+
+    summary = dict(
+        request.app.state.db.query_one(
+            "SELECT enabled,provider,model FROM ai_summary_settings WHERE id=1"
+        )
+    )
+    summary_backends = [
+        {
+            "provider": provider.name,
+            "model": model,
+            "value": f"{provider.name}|{model}",
+        }
+        for provider in runtime_providers(
+            request.app.state.settings.tagger.llm.providers,
+            request.app.state.db,
+            request.app.state.crypto,
+        )
+        if provider.api_key
+        for model in provider.models
+    ]
+    selected = (
+        f"{summary['provider']}|{summary['model']}"
+        if summary["provider"] and summary["model"]
+        else ""
+    )
+    return _page(
+        request,
+        "Providers",
+        rows,
+        user,
+        template="admin_providers.html",
+        summary=summary,
+        summary_backends=summary_backends,
+        summary_selected=selected,
     )
 
 
-@router.post("/providers")
-async def create_provider(request: Request, user: AdminUser):
+@router.post("/providers/summarization")
+async def update_summarization(request: Request, user: AdminUser):
     data = await request_data(request)
     write_guard(request, data, user)
+    enabled = flag(data.get("enabled"))
+    backend = str(data.get("backend", "")).strip()
+    provider_name, separator, model = backend.partition("|")
+    available = runtime_providers(
+        request.app.state.settings.tagger.llm.providers,
+        request.app.state.db,
+        request.app.state.crypto,
+    )
+    selected = next(
+        (
+            provider
+            for provider in available
+            if provider.name == provider_name and model in provider.models and provider.api_key
+        ),
+        None,
+    )
+    if (enabled or backend) and (not separator or selected is None):
+        raise HTTPException(400, "invalid summary provider/model")
+    request.app.state.db.execute(
+        "UPDATE ai_summary_settings SET enabled=?,provider=?,model=?,updated_at=? WHERE id=1",
+        (
+            enabled,
+            provider_name if selected else None,
+            model if selected else None,
+            now_iso(),
+        ),
+    )
+    audit(
+        request.app.state.db,
+        "admin.ai_summary_updated",
+        request=request,
+        user_id=user["id"],
+        target_type="ai_summary_settings",
+        target_id=1,
+        detail=json.dumps(
+            {"enabled": bool(enabled), "provider": provider_name, "model": model}
+        ),
+    )
+    return (
+        {"ok": True, "enabled": bool(enabled), "provider": provider_name, "model": model}
+        if wants_json(request)
+        else RedirectResponse("/admin/providers", 303)
+    )
+
+
+def _provider_config(data: dict, key: str | None = None) -> ProviderConfig:
     models = [part.strip() for part in str(data.get("models", "")).split(",") if part.strip()]
-    key = data.get("api_key")
-    if not isinstance(key, str) or not 1 <= len(key) <= 4096 or any(ord(char) < 32 for char in key):
-        raise HTTPException(400, "invalid API key")
     if not models or any(len(model) > 256 for model in models):
         raise HTTPException(400, "invalid models")
     try:
-        provider = ProviderConfig(
+        return ProviderConfig(
             name=str(data.get("name", "")).strip(),
             type=str(data.get("type", "")),
             base_url=str(data.get("base_url", "")).strip() or None,
@@ -1114,24 +1320,42 @@ async def create_provider(request: Request, user: AdminUser):
         )
     except ValidationError as exc:
         raise HTTPException(400, "invalid provider configuration") from exc
-    if provider.name in {item.name for item in request.app.state.settings.tagger.llm.providers}:
-        raise HTTPException(409, "provider name is already used by configuration")
+
+
+@router.post("/providers")
+async def create_provider(request: Request, user: AdminUser):
+    data = await request_data(request)
+    write_guard(request, data, user)
+    key = data.get("api_key")
+    if not isinstance(key, str) or not 1 <= len(key) <= 4096 or any(ord(char) < 32 for char in key):
+        raise HTTPException(400, "invalid API key")
+    provider = _provider_config(data, key)
     try:
-        cursor = request.app.state.db.execute(
-            "INSERT INTO llm_providers "
-            "(name,type,base_url,models_json,max_input_chars,api_key_enc,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (
-                provider.name,
-                provider.type,
-                provider.base_url,
-                json.dumps(provider.models),
-                provider.max_input_chars,
-                request.app.state.crypto.encrypt(key),
-                now_iso(),
-                now_iso(),
-            ),
-        )
+        with request.app.state.db.transaction() as conn:
+            cursor = conn.execute(
+                "INSERT INTO llm_providers "
+                "(name,type,base_url,models_json,max_input_chars,api_key_enc,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    provider.name,
+                    provider.type,
+                    provider.base_url,
+                    json.dumps(provider.models),
+                    provider.max_input_chars,
+                    request.app.state.crypto.encrypt(key),
+                    now_iso(),
+                    now_iso(),
+                ),
+            )
+            summary = conn.execute(
+                "SELECT model FROM ai_summary_settings WHERE id=1 AND enabled=1 AND provider=?",
+                (provider.name,),
+            ).fetchone()
+            if summary and summary["model"] not in provider.models:
+                conn.execute(
+                    "UPDATE ai_summary_settings SET enabled=0,updated_at=? WHERE id=1",
+                    (now_iso(),),
+                )
     except Exception as exc:
         raise HTTPException(409, "provider name already exists") from exc
     audit(
@@ -1147,6 +1371,127 @@ async def create_provider(request: Request, user: AdminUser):
         if wants_json(request)
         else RedirectResponse("/admin/providers", 303)
     )
+
+
+@router.get("/providers/{provider_id:int}/edit")
+async def edit_provider(provider_id: int, request: Request, user: AdminUser):
+    row = request.app.state.db.query_one(
+        "SELECT id,name,type,base_url,models_json,max_input_chars FROM llm_providers WHERE id=?",
+        (provider_id,),
+    )
+    if row is None:
+        raise HTTPException(404)
+    provider = dict(row)
+    provider["models"] = ", ".join(json.loads(provider.pop("models_json")))
+    return _page(
+        request,
+        "Edit provider",
+        [provider],
+        user,
+        template="admin_provider_edit.html",
+        provider=provider,
+    )
+
+
+@router.post("/providers/{provider_id:int}")
+async def update_provider(provider_id: int, request: Request, user: AdminUser):
+    data = await request_data(request)
+    write_guard(request, data, user)
+    existing = request.app.state.db.query_one(
+        "SELECT name,api_key_enc FROM llm_providers WHERE id=?", (provider_id,)
+    )
+    if existing is None:
+        raise HTTPException(404)
+    key = data.get("api_key")
+    if key is None or key == "":
+        key = None
+        encrypted_key = existing["api_key_enc"]
+    elif not isinstance(key, str) or len(key) > 4096 or any(ord(char) < 32 for char in key):
+        raise HTTPException(400, "invalid API key")
+    else:
+        encrypted_key = request.app.state.crypto.encrypt(key)
+    provider = _provider_config(data, key)
+    try:
+        with request.app.state.db.transaction() as conn:
+            conn.execute(
+                "UPDATE llm_providers SET name=?,type=?,base_url=?,models_json=?,max_input_chars=?,"
+                "api_key_enc=?,updated_at=? WHERE id=?",
+                (
+                    provider.name,
+                    provider.type,
+                    provider.base_url,
+                    json.dumps(provider.models),
+                    provider.max_input_chars,
+                    encrypted_key,
+                    now_iso(),
+                    provider_id,
+                ),
+            )
+            summary = conn.execute(
+                "SELECT enabled,model FROM ai_summary_settings WHERE id=1 AND provider=?",
+                (existing["name"],),
+            ).fetchone()
+            if summary:
+                conn.execute(
+                    "UPDATE ai_summary_settings SET provider=?,enabled=?,updated_at=? WHERE id=1",
+                    (
+                        provider.name,
+                        int(bool(summary["enabled"]) and summary["model"] in provider.models),
+                        now_iso(),
+                    ),
+                )
+    except Exception as exc:
+        raise HTTPException(409, "provider name already exists") from exc
+    audit(
+        request.app.state.db,
+        "admin.provider_updated",
+        request=request,
+        user_id=user["id"],
+        target_type="provider",
+        target_id=provider_id,
+    )
+    return (
+        {"ok": True, "name": provider.name}
+        if wants_json(request)
+        else RedirectResponse("/admin/providers", 303)
+    )
+
+
+@router.delete("/providers/{provider_id:int}")
+@router.post("/providers/{provider_id:int}/delete")
+async def delete_provider(provider_id: int, request: Request, user: AdminUser):
+    data = await request_data(request)
+    write_guard(request, data, user)
+    if request.method == "POST" and not flag(data.get("confirm")):
+        raise HTTPException(400, "deletion must be confirmed")
+    row = request.app.state.db.query_one(
+        "SELECT name FROM llm_providers WHERE id=?", (provider_id,)
+    )
+    if row is None:
+        raise HTTPException(404)
+    with request.app.state.db.transaction() as conn:
+        conn.execute("DELETE FROM llm_providers WHERE id=?", (provider_id,))
+        conn.execute(
+            "UPDATE ai_summary_settings SET enabled=0,provider=NULL,model=NULL,updated_at=? "
+            "WHERE provider=?",
+            (now_iso(), row["name"]),
+        )
+    configured_names = {
+        provider.name for provider in request.app.state.settings.tagger.llm.providers
+    }
+    if row["name"] not in configured_names:
+        request.app.state.db.execute(
+            "DELETE FROM provider_health WHERE provider=?", (row["name"],)
+        )
+    audit(
+        request.app.state.db,
+        "admin.provider_deleted",
+        request=request,
+        user_id=user["id"],
+        target_type="provider",
+        target_id=provider_id,
+    )
+    return {"ok": True} if wants_json(request) else RedirectResponse("/admin/providers", 303)
 
 
 @router.get("/system")

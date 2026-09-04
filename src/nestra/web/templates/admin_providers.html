@@ -1,10 +1,161 @@
 {% extends "base.html" %}
 {% set title = t("Providers") %}
 {% block content %}
-<h1>{{ t("Providers") }}</h1>
-<nav aria-label="{{ t('Admin') }}"><a href="/admin/users">{{ t("Users") }}</a> · <a href="/admin/sites">{{ t("Sites") }}</a> · <a href="/admin/tagset">{{ t("Tagsets") }}</a>{% if advanced %} · <a href="/admin/system">{{ t("System") }}</a>{% endif %} · <a href="/admin/audit">{{ t("Audit") }}</a></nav>
-<section class="card"><h2>{{ t("Add provider") }}</h2><form method="post" action="/admin/providers" class="stack"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Name") }} <input name="name" required pattern="[a-z0-9][a-z0-9-]{0,62}" placeholder="openrouter"></label><label>{{ t("API type") }} <select name="type"><option value="openai_compatible">OpenAI-compatible</option><option value="gemini">Gemini</option><option value="anthropic">Anthropic</option></select></label><label>{{ t("Base URL") }} <input type="url" name="base_url" placeholder="https://api.example.com/v1"><small>{{ t("Required for OpenAI-compatible; optional for Gemini and Anthropic.") }}</small></label><label>{{ t("Models") }} <input name="models" required maxlength="1024" placeholder="gpt-4o-mini"><small>{{ t("Comma-separated; tried in order.") }}</small></label><label>{{ t("API key") }} <input type="password" name="api_key" required maxlength="4096" autocomplete="new-password"></label><label>{{ t("Maximum input characters") }} <input type="number" name="max_input_chars" value="8000" min="500" required></label><button>{{ t("Add provider") }}</button></form></section>
-<h2>{{ t("Added providers") }}</h2>
-{% for row in rows %}<section class="card"><h3>{{ row.name }}</h3><p>{{ row.type }} · {{ row.models | join(', ') }}</p>{% if row.base_url %}<p>{{ row.base_url }}</p>{% endif %}<p>{{ t("Calls") }}: {{ row.total_calls or 0 }} · {{ t("Failures") }}: {{ row.total_failures or 0 }}</p>{% if row.last_error %}<p>{{ t("Last error") }}: {{ row.last_error }}</p>{% endif %}</section>
-{% else %}<p>{{ t("No providers added yet.") }}</p>{% endfor %}
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Providers") }}</h1>
+    <p>{{ "配置 LLM 模型提供商（OpenAI 兼容、Gemini、Anthropic）、安全密钥与调用监控" if zh else "Configure LLM model providers (OpenAI-compatible, Gemini, Anthropic) and monitor calls." }}</p>
+  </div>
+</div>
+
+<nav aria-label="{{ t('Admin') }}" class="sub-nav">
+  <a href="/admin/users">{{ t("Users") }}</a>
+  <span>·</span>
+  <a href="/admin/sites">{{ t("Sites") }}</a>
+  <span>·</span>
+  <a href="/admin/tagset">{{ t("Tagsets") }}</a>
+  <span>·</span>
+  <a href="/admin/providers" class="active">{{ t("Providers") }}</a>
+  {% if advanced %}
+  <span>·</span>
+  <a href="/admin/system">{{ t("System") }}</a>
+  {% endif %}
+  <span>·</span>
+  <a href="/admin/audit">{{ t("Audit") }}</a>
+</nav>
+
+<section class="card" style="margin-bottom: 24px;">
+  <h2>{{ t("AI summaries") }}</h2>
+  <p>{{ t("Optionally summarize each new article before AI tagging. The summary backend may differ from the tagging backend.") }}</p>
+  <form method="post" action="/admin/providers/summarization" class="stack">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <input type="hidden" name="enabled" value="0">
+    <label><input type="checkbox" name="enabled" value="1" {% if summary.enabled %}checked{% endif %}> {{ t("Summarize new articles") }}</label>
+    <label>{{ t("Summary AI") }}
+      <select name="backend">
+        <option value="">{{ t("Choose a provider and model") }}</option>
+        {% for backend in summary_backends %}
+        <option value="{{ backend.value }}" {% if backend.value == summary_selected %}selected{% endif %}>{{ backend.provider }} / {{ backend.model }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% if not summary_backends %}<small>{{ t("Add a provider with an API key first.") }}</small>{% endif %}
+    <div><button type="submit">{{ t("Save summary settings") }}</button></div>
+  </form>
+</section>
+
+<details class="card" style="margin-bottom: 24px;" open>
+  <summary style="cursor: pointer; font-weight: 600; font-size: var(--text-md); list-style: none; display: flex; align-items: center; justify-content: space-between;">
+    <span style="display: flex; align-items: center; gap: 8px;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      {{ t("Add provider") }}
+    </span>
+    <span style="font-size: var(--text-xs); color: var(--text-muted); font-weight: normal;">{{ "点击收起/展开表单" if zh else "Toggle form" }}</span>
+  </summary>
+  <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+    <form method="post" action="/admin/providers" class="stack">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <div class="form-grid">
+        <label>{{ t("Name") }} <input type="text" name="name" required pattern="[a-z0-9][a-z0-9-]{0,62}" placeholder="openrouter"></label>
+        <label>{{ t("API type") }}
+          <select name="type">
+            <option value="openai_compatible">OpenAI-Compatible</option>
+            <option value="gemini">Gemini</option>
+            <option value="anthropic">Anthropic</option>
+          </select>
+        </label>
+        <label>{{ t("Base URL") }}
+          <input type="url" name="base_url" placeholder="https://api.example.com/v1">
+          <small>{{ t("For OpenAI-Compatible, a bare domain gets /v1 automatically; end with / or include a path to use it as entered.") }}</small>
+        </label>
+        <label>{{ t("Models") }}
+          <input type="text" name="models" required maxlength="1024" placeholder="gpt-4o-mini">
+          <small>{{ t("Comma-separated; tried in order.") }}</small>
+        </label>
+        <label>{{ t("API key") }}
+          <input type="password" name="api_key" required maxlength="4096" autocomplete="new-password">
+        </label>
+        <label>{{ t("Maximum input characters") }}
+          <input type="number" name="max_input_chars" value="8000" min="500" required>
+        </label>
+      </div>
+      <div>
+        <button type="submit">{{ t("Add provider") }}</button>
+      </div>
+    </form>
+  </div>
+</details>
+
+<div class="page-header" style="margin-top: 32px; border-bottom: none; padding-bottom: 0;">
+  <div class="page-header-text">
+    <h2>{{ t("Configured providers") }}</h2>
+    <p>{{ t("Providers added here override config.yaml entries with the same name.") }}</p>
+  </div>
+</div>
+
+{% if rows %}
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th scope="col">{{ t("Name") }}</th>
+        <th scope="col">{{ t("Source") }}</th>
+        <th scope="col">{{ t("API type") }}</th>
+        <th scope="col">{{ t("Models") }}</th>
+        <th scope="col">{{ t("Base URL") }}</th>
+        <th scope="col">{{ t("Calls") }} / {{ t("Failures") }}</th>
+        <th scope="col">{{ t("Status") if not zh else "运行状态" }}</th>
+        <th scope="col">{{ t("Actions") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          <strong style="color: var(--text-primary);">{{ row.name }}</strong>
+        </td>
+        <td>
+          <span class="badge badge-neutral">{{ t("Configuration file") if row.source == "configuration" else t("Web form") }}</span>
+        </td>
+        <td>
+          <span class="badge badge-neutral">{{ row.type }}</span>
+        </td>
+        <td>
+          <code style="font-size: var(--text-xs);">{{ row.models | join(', ') }}</code>
+        </td>
+        <td>
+          <span style="font-size: var(--text-xs); color: var(--text-muted);">{{ row.base_url or "-" }}</span>
+        </td>
+        <td>
+          <span class="tabular-nums" style="font-size: var(--text-xs);">
+            {{ t("Calls") }}: {{ row.total_calls or 0 }} · {{ t("Failures") }}: {{ row.total_failures or 0 }}
+          </span>
+        </td>
+        <td>
+          {% if not row.api_key_configured %}
+            <span class="badge badge-warning">{{ t("API key missing") }}</span>
+            {% if row.api_key_env %}<code title="{{ t('Set this environment variable and restart Nestra.') }}">{{ row.api_key_env }}</code>{% endif %}
+          {% elif row.last_error %}
+            <span class="badge badge-danger" title="{{ row.last_error }}">{{ t("Last error") }}: {{ row.last_error }}</span>
+          {% else %}
+            <span class="badge badge-success">{{ t("active") if not zh else "正常" }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.source == "web" %}
+            <a class="btn btn-secondary" style="font-size: var(--text-xs); padding: 4px 10px; text-decoration: none;" href="/admin/providers/{{ row.id }}/edit">{{ t("Edit") }}</a>
+          {% else %}
+            <span style="font-size: var(--text-xs); color: var(--text-muted);">{{ t("Add the same name above to manage it here.") }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <h3>{{ t("No providers added yet.") }}</h3>
+</div>
+{% endif %}
 {% endblock %}

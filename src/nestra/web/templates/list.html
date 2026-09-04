@@ -1,11 +1,50 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ t(title) }}</h1>
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t(title) }}</h1>
+    <p>{{ "系统运行监控与日志记录" if zh else "Live telemetry, status and system records." }}</p>
+  </div>
+</div>
 {% if rows %}
-<div class="table-wrap"><table>
+<div class="table-wrap"><table class="data-table">
   <caption class="visually-hidden">{{ t(title) }}</caption>
   <thead><tr>{% for key in rows[0].keys() %}<th scope="col">{{ t(key | replace('_', ' ') | title) }}</th>{% endfor %}</tr></thead>
-  <tbody>{% for row in rows %}<tr>{% for key, value in row.items() %}<td>{% if title == "Dashboard" and key == "title" %}<a href="/articles/{{ row.id }}">{{ value }}</a>{% else %}{{ value }}{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      {% for key, value in row.items() %}
+      <td>
+        {% if title == "Dashboard" and key == "title" %}
+          <a href="/articles/{{ row.id }}" style="font-weight: 600; color: var(--text-primary); text-decoration: none;">{{ value }}</a>
+        {% elif key in ('status', 'action', 'role') %}
+          {% if value in ('sent', 'NOTIFIED', 'active', 'enabled', 'frozen', 'done', 'ok') %}
+            <span class="badge badge-success">{{ value }}</span>
+          {% elif value in ('failed', 'error', 'disabled') %}
+            <span class="badge badge-danger">{{ value }}</span>
+          {% elif value in ('queued', 'running', 'draft') %}
+            <span class="badge badge-warning">{{ value }}</span>
+          {% else %}
+            <span class="badge badge-neutral">{{ value }}</span>
+          {% endif %}
+        {% elif key in ('id', 'user_id', 'target_id', 'ip', 'url_hash') %}
+          <code>{{ value }}</code>
+        {% elif key in ('created_at', 'delivered_at', 'sent_at') %}
+          <span class="tabular-nums" style="color: var(--text-muted); font-size: var(--text-xs);">{{ value }}</span>
+        {% else %}
+          {{ value }}
+        {% endif %}
+      </td>
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
 </table></div>
-{% else %}<p>{{ t("No records.") }}</p>{% endif %}
+{% else %}
+<div class="empty-state">
+  <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+  <h3>{{ t("No records.") }}</h3>
+  <p>{{ "当前系统暂无此项数据记录。" if zh else "No records found in this view." }}</p>
+</div>
+{% endif %}
 {% endblock %}

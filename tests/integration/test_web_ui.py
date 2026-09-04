@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from pathlib import Path
@@ -12,6 +13,7 @@ import httpx
 import pytest
 import yaml
 
+from nestra.core.config import ProviderConfig
 from nestra.core.time import now_iso
 from nestra.web.api.admin import _site_data
 from nestra.web.app import create_app
@@ -155,7 +157,89 @@ async def test_settings_controls_language_and_advanced_menu(web_ui) -> None:
         assert response.status_code == 200 and text in response.text
 
 
-async def test_admin_can_add_encrypted_web_provider(web_ui) -> None:
+async def test_web_provider_overrides_same_named_configuration(web_ui) -> None:
+    app, client, csrf = web_ui
+    app.state.settings.tagger.llm.providers.append(
+        ProviderConfig(
+            name="deepseek",
+            type="openai_compatible",
+            base_url="https://api.deepseek.com/v1",
+            api_key_env="NESTRA_TEST_DEEPSEEK_API_KEY",
+            models=["deepseek-chat"],
+        )
+    )
+
+    configured = await client.get("/admin/providers?format=json")
+    assert configured.status_code == 200
+    assert configured.json()[0]["source"] == "configuration"
+
+    created = await client.post(
+        "/admin/providers?format=json",
+        json={
+            "name": "deepseek",
+            "type": "openai_compatible",
+            "base_url": "https://api.deepseek.com/v1",
+            "models": "deepseek-chat",
+            "api_key": "web-secret",
+        },
+        headers={"x-csrf-token": csrf},
+    )
+    assert created.status_code == 200
+
+    listed = (await client.get("/admin/providers?format=json")).json()
+    assert len(listed) == 1
+    assert listed[0]["name"] == "deepseek" and listed[0]["source"] == "web"
+
+    from nestra.scheduler.jobs import build_dependencies
+
+    dependencies = build_dependencies(app.state.settings, app.state.db)
+    try:
+        providers = dependencies.tagger._providers()
+        assert len(providers) == 1
+        assert providers[0].name == "deepseek" and providers[0].api_key == "web-secret"
+    finally:
+        await dependencies.aclose()
+
+
+async def test_admin_can_choose_and_toggle_summary_ai(web_ui) -> None:
+    app, client, csrf = web_ui
+    created = await client.post(
+        "/admin/providers?format=json",
+        json={
+            "name": "summary-ai",
+            "type": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "models": "summary-model",
+            "api_key": "summary-secret",
+        },
+        headers={"x-csrf-token": csrf},
+    )
+    assert created.status_code == 200
+
+    enabled = await client.post(
+        "/admin/providers/summarization?format=json",
+        json={"enabled": True, "backend": "summary-ai|summary-model"},
+        headers={"x-csrf-token": csrf},
+    )
+    assert enabled.status_code == 200
+    row = app.state.db.query_one(
+        "SELECT enabled,provider,model FROM ai_summary_settings WHERE id=1"
+    )
+    assert tuple(row) == (1, "summary-ai", "summary-model")
+    page = await client.get("/admin/providers")
+    assert "Summarize new articles" in page.text
+    assert 'value="summary-ai|summary-model" selected' in page.text
+
+    disabled = await client.post(
+        "/admin/providers/summarization?format=json",
+        json={"enabled": False, "backend": "summary-ai|summary-model"},
+        headers={"x-csrf-token": csrf},
+    )
+    assert disabled.status_code == 200
+    assert app.state.db.query_one("SELECT enabled FROM ai_summary_settings WHERE id=1")[0] == 0
+
+
+async def test_admin_can_manage_encrypted_web_provider(web_ui) -> None:
     app, client, csrf = web_ui
     key = "web-provider-secret"
     response = await client.post(
@@ -171,15 +255,38 @@ async def test_admin_can_add_encrypted_web_provider(web_ui) -> None:
         headers={"x-csrf-token": csrf},
     )
     assert response.status_code == 200 and key not in response.text
-    row = app.state.db.query_one("SELECT api_key_enc FROM llm_providers WHERE name='web-provider'")
+    provider_id = response.json()["id"]
+    row = app.state.db.query_one("SELECT api_key_enc FROM llm_providers WHERE id=?", (provider_id,))
     assert row and key.encode() not in bytes(row["api_key_enc"])
-    from nestra.scheduler.jobs import build_dependencies
+    assert key not in (await client.get(f"/admin/providers/{provider_id}/edit")).text
 
-    dependencies = build_dependencies(app.state.settings, app.state.db)
-    try:
-        assert [provider.name for provider in dependencies.tagger._providers()] == ["web-provider"]
-    finally:
-        await dependencies.aclose()
+    for provider_type, model in (("gemini", "gemini-2.5-flash"), ("anthropic", "claude-sonnet-4-5")):
+        updated = await client.post(
+            f"/admin/providers/{provider_id}?format=json",
+            json={
+                "name": "web-provider",
+                "type": provider_type,
+                "base_url": "",
+                "models": model,
+                "api_key": "",
+                "max_input_chars": 12000,
+            },
+            headers={"x-csrf-token": csrf},
+        )
+        assert updated.status_code == 200
+        row = app.state.db.query_one(
+            "SELECT type,base_url,models_json,api_key_enc FROM llm_providers WHERE id=?",
+            (provider_id,),
+        )
+        assert row["type"] == provider_type and row["base_url"] is None
+        assert json.loads(row["models_json"]) == [model]
+        assert app.state.crypto.decrypt(bytes(row["api_key_enc"])) == key
+
+    deleted = await client.delete(
+        f"/admin/providers/{provider_id}?format=json", headers={"x-csrf-token": csrf}
+    )
+    assert deleted.status_code == 200 and deleted.json() == {"ok": True}
+    assert app.state.db.query_one("SELECT id FROM llm_providers WHERE id=?", (provider_id,)) is None
 
 
 async def test_selector_editor_overrides_candidate() -> None:
@@ -204,8 +311,10 @@ async def test_selector_editor_overrides_candidate() -> None:
             "title_selector": "h2 a",
             "published_at_selector": "time",
             "content_selector": "main.article",
+            "crawl_interval_minutes": "45",
         }
     )
+    assert site.crawl_interval_sec == 2700
     assert site.discovery.item_selector == "article.notice"
     assert site.discovery.fields == {
         "url": "h2 a@href",
@@ -289,6 +398,72 @@ async def test_picker_escapes_preview_content(web_ui) -> None:
     assert response.status_code == 200
     assert "<script>alert(1)</script>" not in response.text
     assert "sandbox" in response.text
+
+
+async def test_picker_shows_actionable_failure(web_ui) -> None:
+    app, client, _csrf = web_ui
+    user_id = app.state.db.query_one("SELECT id FROM users WHERE username='admin'")[0]
+    app.state.probe_tasks["failed"] = {
+        "status": "failed",
+        "error": "ProbeError: HTTP 403 for https://example.test/",
+        "created_at": time.time(),
+        "user_id": user_id,
+    }
+
+    response = await client.get("/admin/sites/picker?task_id=failed")
+
+    assert "ProbeError: HTTP 403" in response.text
+    assert "publicly reachable" in response.text
+    assert "Refresh" not in response.headers
+
+
+async def test_site_page_shows_running_crawl_and_deduplicates_submit(web_ui) -> None:
+    app, client, csrf = web_ui
+    timestamp = now_iso()
+    group_id = app.state.db.query_one("SELECT id FROM tagset_groups WHERE slug='test'")[0]
+    site_id = app.state.db.execute(
+        "INSERT INTO sites (slug,name,base_url,discovery_mode,tagset_group_id,config_json,"
+        "enabled,created_at,updated_at) VALUES ('running','Running','https://example.test',"
+        "'rss',?,'{}',1,?,?)",
+        (group_id, timestamp, timestamp),
+    ).lastrowid
+    app.state.crawl_tasks[site_id] = {"status": "running", "created_at": timestamp}
+
+    page = await client.get("/admin/sites")
+    duplicate = await client.post(
+        f"/admin/sites/{site_id}/crawl", data={"_csrf": csrf}, follow_redirects=False
+    )
+
+    assert page.headers["Refresh"] == "2; url=/admin/sites"
+    assert "Crawling" in page.text and "disabled" in page.text
+    assert duplicate.status_code == 303
+    assert len(app.state.crawl_tasks) == 1
+
+
+async def test_site_page_shows_and_updates_crawl_frequency(web_ui) -> None:
+    app, client, csrf = web_ui
+    timestamp = now_iso()
+    group_id = app.state.db.query_one("SELECT id FROM tagset_groups WHERE slug='test'")[0]
+    site_id = app.state.db.execute(
+        "INSERT INTO sites (slug,name,base_url,discovery_mode,tagset_group_id,config_json,"
+        "crawl_interval_sec,created_at,updated_at) VALUES ('timed','Timed','https://example.test',"
+        "'rss',?,'{}',1800,?,?)",
+        (group_id, timestamp, timestamp),
+    ).lastrowid
+
+    page = await client.get("/admin/sites")
+    assert "Crawl frequency: Every 30 minutes" in page.text
+    assert f'action="/admin/sites/{site_id}/crawl-interval"' in page.text
+
+    response = await client.post(
+        f"/admin/sites/{site_id}/crawl-interval",
+        data={"_csrf": csrf, "crawl_interval_minutes": "45"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert app.state.db.query_one(
+        "SELECT crawl_interval_sec FROM sites WHERE id=?", (site_id,)
+    )[0] == 2700
 
 
 async def test_user_forms_manage_resources_without_rendering_target_secrets(web_ui) -> None:

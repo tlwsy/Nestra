@@ -159,8 +159,10 @@ async def test_failed_article_retries_when_discovery_is_unchanged(
     monkeypatch.setattr("nestra.crawler.service.discover_rss", discover)
     fetcher = DetailFetcher()
     assert (await crawl_site(settings, db, stored, fetcher=fetcher)).failed == 1
-    assert db.query_one("SELECT status FROM articles")[0] == "FAILED"
-    assert db.query_one("SELECT consecutive_failures FROM sites")[0] == 1
+    article = db.query_one("SELECT status,last_error FROM articles")
+    assert article["status"] == "FAILED" and "temporary" in article["last_error"]
+    site = db.query_one("SELECT consecutive_failures,last_error FROM sites")
+    assert site["consecutive_failures"] == 0 and site["last_error"] is None
     assert db.query_one("SELECT attempts FROM articles")[0] == 1
     assert (await crawl_site(settings, db, stored, fetcher=fetcher)).extracted == 1
     assert db.query_one("SELECT status FROM articles")[0] == "EXTRACTED"

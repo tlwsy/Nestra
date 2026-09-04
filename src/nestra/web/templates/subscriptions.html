@@ -4,23 +4,112 @@
 {% set item = subscription or {} %}
 <form method="post" action="{{ '/subscriptions/' ~ item.id if subscription else '/subscriptions' }}" class="stack">
   <input type="hidden" name="_csrf" value="{{ csrf }}">
-  <label>{{ t("Name") }} <input name="name" value="{{ item.name or '' }}" required maxlength="100"></label>
+  <label>{{ t("Name") }} <input type="text" name="name" value="{{ item.name or '' }}" required maxlength="100" placeholder="{{ '例如：AI 研究前沿速递' if zh else 'e.g. AI Research Digest' }}"></label>
   <div class="form-grid">
-    <label>{{ t("Match tags") }}<select name="match_mode"><option value="any"{% if item.match_mode != 'all' %} selected{% endif %}>{{ t("Any selected tag") }}</option><option value="all"{% if item.match_mode == 'all' %} selected{% endif %}>{{ t("All selected tags") }}</option></select></label>
-    <label>{{ t("Minimum confidence") }}<input type="number" name="min_confidence" value="{{ item.min_confidence if subscription else 0.5 }}" min="0" max="1" step="0.05" required></label>
-    <label>{{ t("Quiet hours") }}<input name="quiet_hours" value="{{ item.quiet_hours or '' }}" placeholder="23:00-07:00" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]-([01]?[0-9]|2[0-3]):[0-5][0-9]"></label>
+    <label>{{ t("Match tags") }}
+      <select name="match_mode">
+        <option value="any"{% if item.match_mode != 'all' %} selected{% endif %}>{{ t("Any selected tag") }}</option>
+        <option value="all"{% if item.match_mode == 'all' %} selected{% endif %}>{{ t("All selected tags") }}</option>
+      </select>
+    </label>
+    <label>{{ t("Minimum confidence") }}
+      <input type="number" name="min_confidence" value="{{ item.min_confidence if subscription else 0.5 }}" min="0" max="1" step="0.05" required>
+    </label>
+    <label>{{ t("Quiet hours") }}
+      <input type="text" name="quiet_hours" value="{{ item.quiet_hours or '' }}" placeholder="23:00-07:00" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]-([01]?[0-9]|2[0-3]):[0-5][0-9]">
+    </label>
   </div>
-  <fieldset><legend>{{ t("Tags") }}</legend><div class="options">{% for tag in tags %}<label><input type="checkbox" name="tag_ids" value="{{ tag.id }}"{% if tag.id in (item.tag_ids or []) %} checked{% endif %}> {{ tag.name }}</label>{% else %}<span>{{ t("No tags available.") }}</span>{% endfor %}</div></fieldset>
-  <fieldset><legend>{{ t("Sites") }} <small>{{ t("(none means all sites)") }}</small></legend><div class="options">{% for site in sites %}<label><input type="checkbox" name="site_ids" value="{{ site.id }}"{% if site.id in (item.site_ids or []) %} checked{% endif %}> {{ site.name }}</label>{% else %}<span>{{ t("No sites available.") }}</span>{% endfor %}</div></fieldset>
-  <fieldset><legend>{{ t("Notification targets") }}</legend><div class="options">{% for target in targets %}<label><input type="checkbox" name="target_ids" value="{{ target.id }}"{% if target.id in (item.target_ids or []) %} checked{% endif %}> {{ target.name }}</label>{% else %}<span>{{ t("No targets available.") }} <a href="/targets">{{ t("Create one") }}</a>.</span>{% endfor %}</div></fieldset>
-  <div class="options"><input type="hidden" name="include_attachments" value="0"><label><input type="checkbox" name="include_attachments" value="1"{% if not subscription or item.include_attachments %} checked{% endif %}> {{ t("Include attachments") }}</label><input type="hidden" name="enabled" value="0"><label><input type="checkbox" name="enabled" value="1"{% if not subscription or item.enabled %} checked{% endif %}> {{ t("Enabled") }}</label></div>
-  <button>{{ t("Save subscription") if subscription else t("Create subscription") }}</button>
+  <fieldset>
+    <legend>{{ t("Tags") }}</legend>
+    <div class="options">
+      {% for tag in tags %}
+        <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}"{% if tag.id in (item.tag_ids or []) %} checked{% endif %}> {{ tag.name }}</label>
+      {% else %}
+        <small>{{ t("No tags available.") }}</small>
+      {% endfor %}
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>{{ t("Sites") }} <small>{{ t("(none means all sites)") }}</small></legend>
+    <div class="options">
+      {% for site in sites %}
+        <label><input type="checkbox" name="site_ids" value="{{ site.id }}"{% if site.id in (item.site_ids or []) %} checked{% endif %}> {{ site.name }}</label>
+      {% else %}
+        <small>{{ t("No sites available.") }}</small>
+      {% endfor %}
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>{{ t("Notification targets") }}</legend>
+    <div class="options">
+      {% for target in targets %}
+        <label><input type="checkbox" name="target_ids" value="{{ target.id }}"{% if target.id in (item.target_ids or []) %} checked{% endif %}> {{ target.name }}</label>
+      {% else %}
+        <small>{{ t("No targets available.") }} <a href="/targets" style="color: var(--accent);">{{ t("Create one") }}</a>.</small>
+      {% endfor %}
+    </div>
+  </fieldset>
+  <div class="options" style="margin: 4px 0;">
+    <input type="hidden" name="include_attachments" value="0">
+    <label><input type="checkbox" name="include_attachments" value="1"{% if not subscription or item.include_attachments %} checked{% endif %}> {{ t("Include attachments") }}</label>
+    <input type="hidden" name="enabled" value="0">
+    <label><input type="checkbox" name="enabled" value="1"{% if not subscription or item.enabled %} checked{% endif %}> {{ t("Enabled") }}</label>
+  </div>
+  <div>
+    <button type="submit">{{ t("Save subscription") if subscription else t("Create subscription") }}</button>
+  </div>
 </form>
 {% endmacro %}
 {% block content %}
-<h1>{{ t("Subscriptions") }}</h1>
-<section class="card" aria-labelledby="new-subscription"><h2 id="new-subscription">{{ t("New subscription") }}</h2>{{ subscription_form() }}</section>
-<h2>{{ t("Your subscriptions") }}</h2>
-{% for subscription in subscriptions %}<section class="card" aria-labelledby="subscription-{{ subscription.id }}"><h3 id="subscription-{{ subscription.id }}">{{ subscription.name }}</h3>{{ subscription_form(subscription) }}<form method="post" action="/subscriptions/{{ subscription.id }}/delete" class="actions"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="danger">{{ t("Delete subscription") }}</button></form></section>
-{% else %}<p>{{ t("No subscriptions yet.") }}</p>{% endfor %}
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Subscriptions") }}</h1>
+    <p>{{ "配置关键词标签、站点过滤、置信度阈值与多渠道推送路由" if zh else "Configure tag filtering, site scope, confidence thresholds and delivery routing." }}</p>
+  </div>
+</div>
+
+<details class="card" style="margin-bottom: 24px;" open aria-labelledby="new-subscription">
+  <summary style="cursor: pointer; font-weight: 600; font-size: var(--text-md); list-style: none; display: flex; align-items: center; justify-content: space-between;">
+    <span id="new-subscription" style="display: flex; align-items: center; gap: 8px;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      {{ t("New subscription") }}
+    </span>
+    <span style="font-size: var(--text-xs); color: var(--text-muted); font-weight: normal;">{{ "点击收起/展开表单" if zh else "Toggle form" }}</span>
+  </summary>
+  <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+    {{ subscription_form() }}
+  </div>
+</details>
+
+<div class="page-header" style="margin-top: 32px; border-bottom: none; padding-bottom: 0;">
+  <h2>{{ t("Your subscriptions") }}</h2>
+</div>
+
+{% for subscription in subscriptions %}
+<section class="card" aria-labelledby="subscription-{{ subscription.id }}" style="margin-bottom: 20px;">
+  <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle);">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <h3 id="subscription-{{ subscription.id }}" style="margin: 0; font-size: var(--text-base);">{{ subscription.name }}</h3>
+      {% if subscription.enabled %}
+        <span class="badge badge-success">{{ t("Enabled") }}</span>
+      {% else %}
+        <span class="badge badge-neutral">{{ t("disabled") }}</span>
+      {% endif %}
+      <span class="badge badge-neutral">{{ t(subscription.match_mode) if subscription.match_mode else "any" }}</span>
+      <span class="badge badge-neutral">≥ {{ subscription.min_confidence }}</span>
+    </div>
+    <form method="post" action="/subscriptions/{{ subscription.id }}/delete" class="actions" style="margin: 0;">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <button class="danger" style="font-size: var(--text-xs); padding: 4px 10px;">{{ t("Delete subscription") }}</button>
+    </form>
+  </div>
+  {{ subscription_form(subscription) }}
+</section>
+{% else %}
+<div class="empty-state">
+  <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+  <h3>{{ t("No subscriptions yet.") }}</h3>
+  <p>{{ "尚未创建订阅规则。使用上方表单创建你的首个订阅！" if zh else "No subscriptions created yet. Use the form above to configure your first subscription." }}</p>
+</div>
+{% endfor %}
 {% endblock %}

@@ -356,6 +356,8 @@ class ProviderConfig(_Base):
                 or any(ord(char) <= 32 or ord(char) == 127 for char in self.base_url)
             ):
                 raise ValueError("provider base_url 必须是无凭据、查询参数或片段的 https URL")
+            if self.type == "openai_compatible" and not parsed.path:
+                self.base_url += "/v1"
         return self
 
     @property
@@ -561,7 +563,9 @@ def _collect_warnings(s: Settings) -> list[str]:
         and not usable
         and not s.tagger.local.enabled
     ):
-        warns.append("当前没有可用打标后端；抓取继续，文章将停在 EXTRACTED")
+        warns.append(
+            "YAML 中没有可用打标后端；可在 Web 配置 provider，未配置时文章将停在 EXTRACTED"
+        )
 
     if s.tagger.local.enabled and not s.tagger.local.model_path.exists():
         warns.append(

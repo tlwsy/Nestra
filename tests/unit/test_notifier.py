@@ -191,12 +191,14 @@ def test_unicode_truncation_and_channel_limit() -> None:
         published_at=datetime(2026, 1, 1, tzinfo=UTC),
         tags=[("通知", 0.88)],
         content="汉字" * 5000,
+        summary="这是 AI 生成的摘要。",
         attachments=[MessageAttachment("课程表.pdf", url="https://example.test/file?token=signed")],
         channel="tgram://…abc",
         max_body_chars=8000,
     )
     assert len(message.body) <= 4096
     assert "token=signed" in message.body
+    assert "AI 总结" in message.body and "这是 AI 生成的摘要。" in message.body
     assert message.body.endswith("…（全文见原文链接）")
     message.body.encode("utf-8")
 

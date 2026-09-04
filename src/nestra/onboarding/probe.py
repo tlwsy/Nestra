@@ -215,9 +215,13 @@ class SafeFetcher:
                     raise ProbeLimitExceeded(
                         f"page exceeded {self.limits.max_bytes_per_page} bytes"
                     )
+            # iter_bytes() already decoded gzip/br content. Do not make httpx decode it twice.
+            headers = response.headers.copy()
+            headers.pop("content-encoding", None)
+            headers["content-length"] = str(len(content))
             return httpx.Response(
                 response.status_code,
-                headers=response.headers,
+                headers=headers,
                 content=bytes(content),
                 request=response.request,
                 extensions=response.extensions,

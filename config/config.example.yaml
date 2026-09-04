@@ -149,27 +149,8 @@ tagger:
     max_retries_per_model: 2
     backoff_base_sec: 2
 
-    # 顺序即优先级：provider 外层遍历，其 models 内层遍历
-    providers:
-      - name: deepseek
-        type: openai_compatible
-        base_url: https://api.deepseek.com/v1
-        api_key_env: DEEPSEEK_API_KEY
-        models: [deepseek-chat]
-        max_input_chars: 8000
-
-      - name: gemini
-        type: gemini
-        api_key_env: GEMINI_API_KEY
-        models: [gemini-2.0-flash, gemini-2.0-flash-lite]
-        max_input_chars: 12000
-
-      - name: openrouter
-        type: openai_compatible
-        base_url: https://openrouter.ai/api/v1
-        api_key_env: OPENROUTER_API_KEY
-        models: [meta-llama/llama-3.3-70b-instruct]
-        max_input_chars: 8000
+    # 默认通过 Web 管理并加密入库；高级用户仍可在此声明环境变量型 provider。
+    providers: []
 
     circuit_breaker:
       failure_threshold: 5

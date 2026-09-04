@@ -83,6 +83,7 @@ Docker 部署把前缀换为 `docker compose -f deploy/docker-compose.yml exec n
 | [09-roadmap.md](docs/09-roadmap.md) | 分阶段实现计划与验收标准 |
 | [10-site-probe-ujs-jwc.md](docs/10-site-probe-ujs-jwc.md) | 首个目标站点的实测探测报告 |
 | [11-site-onboarding.md](docs/11-site-onboarding.md) | 站点接入向导：自动探测 + 可视化确认 |
+| [12-docker-startup.md](docs/12-docker-startup.md) | Docker 首次启动、验证与 WSL 2 排障 |
 
 ## 目录结构
 

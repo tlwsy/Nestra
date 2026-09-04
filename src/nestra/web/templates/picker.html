@@ -1,9 +1,128 @@
 {% extends "base.html" %}
 {% set title = t("Site picker") %}
 {% block content %}
-<h1>{{ t("Site picker") }}</h1><p>{{ t("Only bounded text samples are shown; external scripts and assets are never embedded.") }}</p>
-{% if selectors %}<h2>{{ t("Selector candidates") }}</h2><form method="get" action="/admin/sites/picker"><input type="hidden" name="task_id" value="{{ task_id }}">{% for selector in selectors %}<label><input type="radio" name="selector" value="{{ loop.index0 }}" {% if request.query_params.get('selector', '0') == loop.index0|string %}checked{% endif %}><code>{{ selector.item_selector }}</code> — {{ selector.matches }} {{ t("matches") }}, {{ (selector.confidence * 100)|round|int }}%{% if selector.samples %}<span>{{ t("Samples:") }} {{ selector.samples|join(' · ') }}</span>{% endif %}</label>{% endfor %}<button>{{ t("Use candidate") }}</button></form>{% endif %}
-{% if candidate and not dryrun_done %}<h2>{{ t("Dry-run selected configuration") }}</h2><form method="post" action="/admin/sites/dryrun"><input type="hidden" name="_csrf" value="{{ csrf }}">{% set config = candidate_data.get('config', {}) %}{% set fields = config.get('fields', {}) %}{% set extract = candidate_data.get('extract', {}) %}<fieldset><legend>{{ t("Selector editor") }}</legend><p>{{ t("Adjust uncertain selectors, then validate them with a no-save preview.") }}</p><label>{{ t("List item") }} <input name="item_selector" value="{{ config.get('item_selector', '') }}"></label><label>{{ t("Article link") }} <input name="link_selector" value="{{ fields.get('url', '') }}"></label><label>{{ t("List title") }} <input name="title_selector" value="{{ fields.get('title', '') }}"></label><label>{{ t("List date") }} <input name="published_at_selector" value="{{ fields.get('published_at', '') }}"></label><label>{{ t("Detail content") }} <input name="content_selector" value="{{ extract.get('selectors', {}).get('content', '') }}"></label></fieldset><details><summary>{{ t("Advanced candidate JSON") }}</summary><label>{{ t("Candidate JSON") }} <textarea name="candidate" rows="18" required>{{ candidate }}</textarea></label></details><label>{{ t("Tagset group") }} <select name="tagset_group" required>{% for group in groups %}<option value="{{ group.slug }}">{{ group.name }}</option>{% endfor %}</select></label><button>{{ t("Run preview") }}</button></form>
-{% elif candidate and dryrun_done %}<h2>{{ t("Confirm") }}</h2><p>{{ t("The preview succeeded. Confirmation creates the site disabled; enable it from the Sites page.") }}</p><form method="post" action="/admin/sites/confirm"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="task_id" value="{{ task_id }}"><input type="hidden" name="config_hash" value="{{ config_hash }}"><input type="hidden" name="candidate" value="{{ candidate }}"><button>{{ t("Create disabled site") }}</button></form>{% endif %}
-{% if task_id and not candidate %}<p>{{ t("Task is") }} {{ t(summary_status or 'running') }}. {{ t("Refresh this page for results.") }}</p>{% endif %}<iframe title="{{ t('Sanitized dry-run preview') }}" sandbox srcdoc="{{ preview|e }}"></iframe>
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Site picker") }}</h1>
+    <p>{{ t("Only bounded text samples are shown; external scripts and assets are never embedded.") }}</p>
+  </div>
+  <div>
+    <a href="/admin/sites" class="btn btn-secondary" style="font-size: var(--text-xs); text-decoration: none;">
+      {{ "返回站点列表" if zh else "Back to sites" }}
+    </a>
+  </div>
+</div>
+
+<div class="picker-grid">
+  <!-- Left Column: Controls and Config -->
+  <div class="picker-pane">
+    {% if selectors %}
+    <h2 style="font-size: var(--text-md); margin-top: 0; margin-bottom: 12px;">{{ t("Selector candidates") }}</h2>
+    <form method="get" action="/admin/sites/picker" class="stack" style="margin-bottom: 24px;">
+      <input type="hidden" name="task_id" value="{{ task_id }}">
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        {% for selector in selectors %}
+        <label class="card" style="margin: 0; padding: 10px 12px; cursor: pointer; display: flex; align-items: flex-start; gap: 10px;">
+          <input type="radio" name="selector" value="{{ loop.index0 }}" {% if request.query_params.get('selector', '0') == loop.index0|string %}checked{% endif %} style="margin-top: 3px;">
+          <div style="flex: 1;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <code>{{ selector.item_selector }}</code>
+              <span class="badge badge-neutral">{{ selector.matches }} {{ t("matches") }} · {{ (selector.confidence * 100)|round|int }}%</span>
+            </div>
+            {% if selector.samples %}
+            <div style="font-size: var(--text-xs); color: var(--text-muted); margin-top: 4px;">
+              <strong>{{ t("Samples:") }}</strong> {{ selector.samples|join(' · ') }}
+            </div>
+            {% endif %}
+          </div>
+        </label>
+        {% endfor %}
+      </div>
+      <div>
+        <button type="submit" class="btn-secondary" style="font-size: var(--text-xs);">{{ t("Use candidate") }}</button>
+      </div>
+    </form>
+    {% endif %}
+
+    {% if candidate and not dryrun_done %}
+    <h2 style="font-size: var(--text-md); margin-top: 0; margin-bottom: 12px;">{{ t("Dry-run selected configuration") }}</h2>
+    <form method="post" action="/admin/sites/dryrun" class="stack">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      {% set config = candidate_data.get('config', {}) %}
+      {% set fields = config.get('fields', {}) %}
+      {% set extract = candidate_data.get('extract', {}) %}
+
+      <fieldset>
+        <legend>{{ t("Selector editor") }}</legend>
+        <p style="margin: 4px 0 10px; font-size: var(--text-xs); color: var(--text-muted);">{{ t("Adjust uncertain selectors, then validate them with a no-save preview.") }}</p>
+        <div class="stack" style="gap: 8px;">
+          <label>{{ t("List item") }} <input type="text" name="item_selector" value="{{ config.get('item_selector', '') }}"></label>
+          <label>{{ t("Article link") }} <input type="text" name="link_selector" value="{{ fields.get('url', '') }}"></label>
+          <label>{{ t("List title") }} <input type="text" name="title_selector" value="{{ fields.get('title', '') }}"></label>
+          <label>{{ t("List date") }} <input type="text" name="published_at_selector" value="{{ fields.get('published_at', '') }}"></label>
+          <label>{{ t("Detail content") }} <input type="text" name="content_selector" value="{{ extract.get('selectors', {}).get('content', '') }}"></label>
+        </div>
+      </fieldset>
+
+      <details style="padding: 6px 0;">
+        <summary style="cursor: pointer; font-size: var(--text-xs); color: var(--text-muted);">{{ t("Advanced candidate JSON") }}</summary>
+        <div style="margin-top: 8px;">
+          <label>{{ t("Candidate JSON") }} <textarea name="candidate" rows="10" required>{{ candidate }}</textarea></label>
+        </div>
+      </details>
+
+      <label>{{ t("Tagset group") }}
+        <select name="tagset_group" required>
+          {% for group in groups %}
+          <option value="{{ group.slug }}">{{ group.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label for="crawl-interval">{{ t("Crawl frequency") }}
+        <input id="crawl-interval" type="number" name="crawl_interval_minutes" min="1" step="1" value="{{ candidate_data.get('crawl_interval_sec', 1800) // 60 }}" required aria-describedby="crawl-interval-help">
+        <small id="crawl-interval-help" style="color: var(--text-muted);">{{ t("Interval in minutes; the default is 30.") }}</small>
+      </label>
+
+      <div>
+        <button type="submit">{{ t("Run preview") }}</button>
+      </div>
+    </form>
+    {% elif candidate and dryrun_done %}
+    <div style="background: var(--bg-surface-subtle); padding: 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-default);">
+      <h2 style="font-size: var(--text-md); margin-top: 0; color: var(--status-success-text);">{{ t("Confirm") }}</h2>
+      <p style="font-size: var(--text-sm); margin-bottom: 16px;">{{ t("The preview succeeded. Confirmation creates the site disabled; enable it from the Sites page.") }}</p>
+      <form method="post" action="/admin/sites/confirm">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <input type="hidden" name="task_id" value="{{ task_id }}">
+        <input type="hidden" name="config_hash" value="{{ config_hash }}">
+        <input type="hidden" name="candidate" value="{{ candidate }}">
+        <button type="submit">{{ t("Create disabled site") }}</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if task_id and not candidate %}
+    <div class="alert {{ 'alert-danger' if summary_status == 'failed' else 'alert-info' }}" role="{{ 'alert' if summary_status == 'failed' else 'status' }}">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      {% if summary_status == 'failed' %}
+      <span>{{ t("Probe failed") }}: {{ task_error }}. {{ t("Check that the URL is publicly reachable from this server, then try again.") }}</span>
+      {% else %}
+      <span>{{ t("Task is") }} {{ t(summary_status or 'running') }}. {{ t("This page refreshes automatically.") }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Right Column: Live Sandboxed Preview -->
+  <div class="picker-pane" style="display: flex; flex-direction: column;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+      <span style="font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);">
+        {{ t('Sanitized dry-run preview') }}
+      </span>
+      <span class="badge badge-neutral">sandbox</span>
+    </div>
+    <iframe title="{{ t('Sanitized dry-run preview') }}" sandbox srcdoc="{{ preview|e }}"></iframe>
+  </div>
+</div>
 {% endblock %}

@@ -179,8 +179,11 @@ class Fetcher:
                 await self._sleep(wait)
             self._last_started = time.monotonic()
 
-    async def _send(self, url: str, headers: dict[str, str]) -> tuple[httpx.Response, bytes, str]:
+    async def _send(
+        self, url: str, headers: dict[str, str], *, max_bytes: int | None = None
+    ) -> tuple[httpx.Response, bytes, str]:
         current = url
+        limit = self.max_bytes if max_bytes is None else max_bytes
         for _ in range(6):
             address = await self._validate_url(current)
             parsed = urlsplit(current)
@@ -222,14 +225,14 @@ class Fetcher:
                     current = redirected
                     continue
                 declared = response.headers.get("content-length")
-                if declared and declared.isdigit() and int(declared) > self.max_bytes:
-                    raise ResponseTooLarge(f"响应超过 {self.max_bytes} 字节: {current}")
+                if declared and declared.isdigit() and int(declared) > limit:
+                    raise ResponseTooLarge(f"响应超过 {limit} 字节: {current}")
                 chunks: list[bytes] = []
                 size = 0
                 async for chunk in response.aiter_bytes():
                     size += len(chunk)
-                    if size > self.max_bytes:
-                        raise ResponseTooLarge(f"响应超过 {self.max_bytes} 字节: {current}")
+                    if size > limit:
+                        raise ResponseTooLarge(f"响应超过 {limit} 字节: {current}")
                     chunks.append(chunk)
                 return response, b"".join(chunks), current
         raise HttpStatusError(f"重定向次数超过 5: {url}")
@@ -280,7 +283,11 @@ class Fetcher:
             )
 
     async def fetch_bytes(
-        self, url: str, *, headers: dict[str, str] | None = None
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        max_bytes: int | None = None,
     ) -> BinaryFetchResult:
         """Fetch bounded binary content; retries are handled by the attachment job."""
         if not await self._robots_allowed(url):
@@ -291,7 +298,9 @@ class Fetcher:
             for attempt in range(1, self.config.retry.max_attempts + 1):
                 response: httpx.Response | None = None
                 try:
-                    response, body, final_url = await self._send(url, headers or {})
+                    response, body, final_url = await self._send(
+                        url, headers or {}, max_bytes=max_bytes
+                    )
                 except httpx.TimeoutException as exc:
                     last_error = exc
                     retry = "timeout" in self.config.retry.retry_on

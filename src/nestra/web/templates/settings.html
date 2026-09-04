@@ -1,18 +1,127 @@
 {% extends "base.html" %}
 {% set title = t("Settings") %}
 {% block content %}
-<h1>{{ t("Settings") }}</h1>
-<h2>{{ t("Language") }}</h2>
-<form method="post" action="/settings/language"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Interface language") }} <select name="locale"><option value="en"{% if locale != 'zh' %} selected{% endif %}>English</option><option value="zh"{% if locale == 'zh' %} selected{% endif %}>中文</option></select></label><button>{{ t("Save language") }}</button></form>
-{% if user.role == 'admin' %}
-<h2>{{ t("Advanced mode") }}</h2>
-<form method="post" action="/settings/advanced"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="enabled" value="0"><label><input type="checkbox" name="enabled" value="1"{% if advanced %} checked{% endif %}> {{ t("Show the system-monitoring menu") }}</label><button>{{ t("Save") }}</button></form>
-{% endif %}
-<h2>{{ t("Change password") }}</h2>
-<form method="post" action="/settings/password"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Current password") }} <input type="password" name="old_password" required autocomplete="current-password"></label><label>{{ t("New password") }} <input type="password" name="new_password" required minlength="12" maxlength="1024" autocomplete="new-password"></label><button>{{ t("Change password") }}</button></form>
-<h2>{{ t("Two-factor authentication") }}</h2>
-{% if totp_enabled %}<p>{{ t("Two-factor authentication is enabled.") }}</p><form method="post" action="/settings/totp/disable"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Current password") }} <input type="password" name="password" required autocomplete="current-password"></label><label>{{ t("2FA or recovery code") }} <input name="code" required autocomplete="one-time-code"></label><button class="danger">{{ t("Disable 2FA") }}</button></form>
-{% else %}<form method="post" action="/settings/totp/start"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>{{ t("Set up 2FA") }}</button></form>{% endif %}
-<h2>{{ t("Active sessions") }}</h2><ul>{% for session in sessions %}<li>{{ session.created_at }} · {{ session.created_ip }} · {{ session.user_agent }}</li>{% endfor %}</ul>
-<form method="post" action="/settings/sessions/revoke"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>{{ t("Log out other sessions") }}</button></form>
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Settings") }}</h1>
+    <p>{{ "首选项偏好、系统语言、账户密码、双重验证安全凭据与会话生命周期" if zh else "Preferences, interface language, password, 2FA credentials and active sessions." }}</p>
+  </div>
+</div>
+
+<div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; align-items: start;">
+  <!-- Left Column: Preferences and Security -->
+  <div style="display: flex; flex-direction: column; gap: 20px;">
+    <!-- Language Card -->
+    <section class="card" style="margin: 0;">
+      <h2>{{ t("Language") }}</h2>
+      <form method="post" action="/settings/language" class="stack">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <label>{{ t("Interface language") }}
+          <select name="locale">
+            <option value="en"{% if locale != 'zh' %} selected{% endif %}>English</option>
+            <option value="zh"{% if locale == 'zh' %} selected{% endif %}>中文</option>
+          </select>
+        </label>
+        <div>
+          <button type="submit">{{ t("Save language") }}</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Advanced Mode (Admin only) -->
+    {% if user.role == 'admin' %}
+    <section class="card" style="margin: 0;">
+      <h2>{{ t("Advanced mode") }}</h2>
+      <p style="font-size: var(--text-xs); color: var(--text-muted); margin: 0 0 12px;">
+        {{ "开启后在管理导航中显示底层系统监控指标与实时心跳探测菜单。" if zh else "Reveals underlying system metrics and runtime inspection menus." }}
+      </p>
+      <form method="post" action="/settings/advanced" class="stack">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <input type="hidden" name="enabled" value="0">
+        <label>
+          <input type="checkbox" name="enabled" value="1"{% if advanced %} checked{% endif %}>
+          <span>{{ t("Show the system-monitoring menu") }}</span>
+        </label>
+        <div>
+          <button type="submit">{{ t("Save") }}</button>
+        </div>
+      </form>
+    </section>
+    {% endif %}
+
+    <!-- Change Password -->
+    <section class="card" style="margin: 0;">
+      <h2>{{ t("Change password") }}</h2>
+      <form method="post" action="/settings/password" class="stack">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <label>{{ t("Current password") }}
+          <input type="password" name="old_password" required autocomplete="current-password">
+        </label>
+        <label>{{ t("New password") }}
+          <input type="password" name="new_password" required minlength="12" maxlength="1024" autocomplete="new-password">
+        </label>
+        <div>
+          <button type="submit">{{ t("Change password") }}</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <!-- Right Column: 2FA and Active Sessions -->
+  <div style="display: flex; flex-direction: column; gap: 20px;">
+    <!-- 2FA Card -->
+    <section class="card" style="margin: 0;">
+      <h2>{{ t("Two-factor authentication") }}</h2>
+      {% if totp_enabled %}
+        <div class="alert alert-info" style="margin-bottom: 14px;">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span>{{ t("Two-factor authentication is enabled.") }}</span>
+        </div>
+        <form method="post" action="/settings/totp/disable" class="stack">
+          <input type="hidden" name="_csrf" value="{{ csrf }}">
+          <label>{{ t("Current password") }}
+            <input type="password" name="password" required autocomplete="current-password">
+          </label>
+          <label>{{ t("2FA or recovery code") }}
+            <input type="text" name="code" required autocomplete="one-time-code" placeholder="123456">
+          </label>
+          <div>
+            <button type="submit" class="danger">{{ t("Disable 2FA") }}</button>
+          </div>
+        </form>
+      {% else %}
+        <p style="font-size: var(--text-sm); color: var(--text-muted); margin-bottom: 14px;">
+          {{ "通过 TOTP 验证器应用（Google Authenticator, 1Password, Bitwarden 等）为账号提供额外的安全保障。" if zh else "Add extra layer of protection using standard TOTP authenticator apps." }}
+        </p>
+        <form method="post" action="/settings/totp/start">
+          <input type="hidden" name="_csrf" value="{{ csrf }}">
+          <button type="submit">{{ t("Set up 2FA") }}</button>
+        </form>
+      {% endif %}
+    </section>
+
+    <!-- Sessions Card -->
+    <section class="card" style="margin: 0;">
+      <h2>{{ t("Active sessions") }}</h2>
+      <div style="margin-bottom: 16px;">
+        <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px;">
+          {% for session in sessions %}
+          <li style="background: var(--bg-surface-subtle); border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); padding: 8px 12px; font-size: var(--text-xs); color: var(--text-secondary);">
+            <div style="font-weight: 500; color: var(--text-primary); margin-bottom: 2px;">
+              {{ session.user_agent }}
+            </div>
+            <div style="color: var(--text-muted);">
+              <span class="tabular-nums">{{ session.created_at }}</span> · <code>{{ session.created_ip }}</code>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <form method="post" action="/settings/sessions/revoke">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <button type="submit" class="btn-secondary" style="font-size: var(--text-xs);">{{ t("Log out other sessions") }}</button>
+      </form>
+    </section>
+  </div>
+</div>
 {% endblock %}

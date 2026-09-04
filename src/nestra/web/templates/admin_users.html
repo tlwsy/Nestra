@@ -1,11 +1,134 @@
 {% extends "base.html" %}
 {% set title = t("Users") %}
 {% block content %}
-<h1>{{ t("Users") }}</h1>
-<nav aria-label="{{ t('Admin') }}"><a href="/admin/sites">{{ t("Sites") }}</a> · <a href="/admin/tagset">{{ t("Tagsets") }}</a> · <a href="/admin/providers">{{ t("Providers") }}</a>{% if advanced %} · <a href="/admin/system">{{ t("System") }}</a>{% endif %} · <a href="/admin/audit">{{ t("Audit") }}</a></nav>
-<h2>{{ t("Create user") }}</h2><p>{{ t("The response shows the one-time password. The user must replace it at first login.") }}</p>
-<form method="post" action="/admin/users"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Username") }} <input name="username" required pattern="[a-z0-9_.-]{1,64}"></label><label>{{ t("Email") }} <input name="email" type="email"></label><label>{{ t("Initial password") }} <input name="password" type="password" minlength="12" autocomplete="new-password"></label><label>{{ t("Role") }} <select name="role"><option value="user">{{ t("User") }}</option><option value="admin">{{ t("Admin") }}</option></select></label><button>{{ t("Create") }}</button></form>
-<h2>{{ t("Existing users") }}</h2>
-{% for row in rows %}<section><h3>{{ row.username }}</h3><p>{{ t(row.role) }} · {{ t("active") if row.is_active else t("disabled") }}</p><form method="post" action="/admin/users/{{ row.id }}/status"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="is_active" value="{{ 0 if row.is_active else 1 }}"><button>{{ t("Disable") if row.is_active else t("Enable") }}</button></form><form method="post" action="/admin/users/{{ row.id }}/password"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("New temporary password") }} <input type="password" name="password" minlength="12"></label><button>{{ t("Reset password") }}</button></form>{% if row.totp_enabled %}<form method="post" action="/admin/users/{{ row.id }}/totp/reset"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="danger">{{ t("Reset 2FA") }}</button></form>{% endif %}</section>
-{% else %}<p>{{ t("No users.") }}</p>{% endfor %}
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Users") }}</h1>
+    <p>{{ "管理系统访问凭据、角色授权与双重验证安全状态" if zh else "Manage system access credentials, role authorizations and 2FA security states." }}</p>
+  </div>
+</div>
+
+<nav aria-label="{{ t('Admin') }}" class="sub-nav">
+  <a href="/admin/users" class="active">{{ t("Users") }}</a>
+  <span>·</span>
+  <a href="/admin/sites">{{ t("Sites") }}</a>
+  <span>·</span>
+  <a href="/admin/tagset">{{ t("Tagsets") }}</a>
+  <span>·</span>
+  <a href="/admin/providers">{{ t("Providers") }}</a>
+  {% if advanced %}
+  <span>·</span>
+  <a href="/admin/system">{{ t("System") }}</a>
+  {% endif %}
+  <span>·</span>
+  <a href="/admin/audit">{{ t("Audit") }}</a>
+</nav>
+
+<details class="card" style="margin-bottom: 24px;" open>
+  <summary style="cursor: pointer; font-weight: 600; font-size: var(--text-md); list-style: none; display: flex; align-items: center; justify-content: space-between;">
+    <span style="display: flex; align-items: center; gap: 8px;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+      {{ t("Create user") }}
+    </span>
+    <span style="font-size: var(--text-xs); color: var(--text-muted); font-weight: normal;">{{ "点击收起/展开表单" if zh else "Toggle form" }}</span>
+  </summary>
+  <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+    <p style="margin: 0 0 12px; font-size: var(--text-xs); color: var(--text-muted);">{{ t("The response shows the one-time password. The user must replace it at first login.") }}</p>
+    <form method="post" action="/admin/users" class="stack">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <div class="form-grid">
+        <label>{{ t("Username") }} <input type="text" name="username" required pattern="[a-z0-9_.-]{1,64}" placeholder="john_doe"></label>
+        <label>{{ t("Email") }} <input name="email" type="email" placeholder="john@example.com"></label>
+        <label>{{ t("Initial password") }} <input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="{{ '留空则自动生成' if zh else 'Leave blank to generate' }}"></label>
+        <label>{{ t("Role") }}
+          <select name="role">
+            <option value="user">{{ t("User") }}</option>
+            <option value="admin">{{ t("Admin") }}</option>
+          </select>
+        </label>
+      </div>
+      <div>
+        <button type="submit">{{ t("Create") }}</button>
+      </div>
+    </form>
+  </div>
+</details>
+
+<div class="page-header" style="margin-top: 32px; border-bottom: none; padding-bottom: 0;">
+  <h2>{{ t("Existing users") }}</h2>
+</div>
+
+{% if rows %}
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th scope="col">{{ t("Username") }}</th>
+        <th scope="col">{{ t("Email") }}</th>
+        <th scope="col">{{ t("Role") }}</th>
+        <th scope="col">{{ t("Status") if not zh else "状态" }}</th>
+        <th scope="col">{{ t("Two-factor authentication") }}</th>
+        <th scope="col" style="min-width: 280px;">{{ t("Actions") if not zh else "管理操作" }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          <strong style="color: var(--text-primary);">{{ row.username }}</strong>
+        </td>
+        <td>
+          <span style="color: var(--text-muted); font-size: var(--text-xs);">{{ row.email or "-" }}</span>
+        </td>
+        <td>
+          <span class="badge badge-neutral">{{ t(row.role) }}</span>
+        </td>
+        <td>
+          {% if row.is_active %}
+            <span class="badge badge-success">{{ t("active") }}</span>
+          {% else %}
+            <span class="badge badge-danger">{{ t("disabled") }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.totp_enabled %}
+            <span class="badge badge-success">2FA {{ t("enabled") }}</span>
+          {% else %}
+            <span class="badge badge-neutral">2FA {{ t("none") }}</span>
+          {% endif %}
+        </td>
+        <td>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div class="actions">
+              <form method="post" action="/admin/users/{{ row.id }}/status" style="margin: 0;">
+                <input type="hidden" name="_csrf" value="{{ csrf }}">
+                <input type="hidden" name="is_active" value="{{ 0 if row.is_active else 1 }}">
+                <button type="submit" class="btn-secondary" style="font-size: var(--text-xs); padding: 3px 8px;">
+                  {{ t("Disable") if row.is_active else t("Enable") }}
+                </button>
+              </form>
+              {% if row.totp_enabled %}
+              <form method="post" action="/admin/users/{{ row.id }}/totp/reset" style="margin: 0;">
+                <input type="hidden" name="_csrf" value="{{ csrf }}">
+                <button type="submit" class="danger" style="font-size: var(--text-xs); padding: 3px 8px;">{{ t("Reset 2FA") }}</button>
+              </form>
+              {% endif %}
+            </div>
+            <form method="post" action="/admin/users/{{ row.id }}/password" style="display: flex; gap: 6px; align-items: center; margin: 0;">
+              <input type="hidden" name="_csrf" value="{{ csrf }}">
+              <input type="password" name="password" minlength="12" placeholder="{{ t('New temporary password') }}" style="font-size: var(--text-xs); padding: 3px 8px; width: 170px;">
+              <button type="submit" class="btn-secondary" style="font-size: var(--text-xs); padding: 3px 8px;">{{ t("Reset password") }}</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <h3>{{ t("No users.") }}</h3>
+</div>
+{% endif %}
 {% endblock %}

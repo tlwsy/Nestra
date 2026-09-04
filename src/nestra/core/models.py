@@ -87,6 +87,7 @@ class AttachmentRef:
     source_url: str
     filename: str | None = None
     link_text: str | None = None
+    is_body: bool = False
 
 
 @dataclass(frozen=True, slots=True)

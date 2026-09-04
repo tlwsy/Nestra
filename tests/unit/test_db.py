@@ -65,6 +65,7 @@ def test_migrate_creates_expected_tables(db: Database) -> None:
         "deliveries",
         "provider_health",
         "llm_providers",
+        "ai_summary_settings",
         "audit_log",
     ):
         assert name in tables, f"缺少表 {name}"

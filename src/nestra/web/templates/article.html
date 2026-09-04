@@ -1,17 +1,39 @@
 {% extends "base.html" %}
 {% set title = article.title or t("Article") %}
 {% block content %}
-<article>
-  <h1>{{ article.title }}</h1>
-  <p>{{ article.site }} · {{ article.published_at or "" }}</p>
-  <div class="article-body">{{ article.content_html | safe }}</div>
+<div style="margin-bottom: 16px;">
+  <a href="/articles" class="btn btn-secondary" style="font-size: var(--text-xs); text-decoration: none;">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+    <span>{{ "返回文章列表" if zh else "Back to articles" }}</span>
+  </a>
+</div>
+<article class="article-detail">
+  <h1>{{ article.title or t("Untitled article") }}</h1>
+  <div class="article-meta" style="margin: 10px 0 20px;">
+    <span class="badge badge-neutral">{{ article.site }}</span>
+    {% if admin_view %}<span class="badge {{ 'badge-danger' if article.status == 'FAILED' else 'badge-success' if article.status in ('EXTRACTED', 'TAGGED', 'NOTIFIED') else 'badge-neutral' }}">{{ article.status }}</span>{% endif %}
+    {% if article.published_at %}<span>·</span> <time class="tabular-nums">{{ article.published_at }}</time>{% endif %}
+  </div>
+  {% if admin_view and article.last_error %}<div class="alert alert-danger" role="alert">{{ article.last_error }}</div>{% endif %}
+  {% if article.summary %}
+  <section class="card" style="margin-bottom: 24px;">
+    <h2>{{ t("AI summary") if article.summary_backend else t("Summary") }}</h2>
+    <p style="white-space: pre-wrap;">{{ article.summary }}</p>
+  </section>
+  {% endif %}
+  {% if article.content_html %}<div class="article-body">{{ article.content_html | safe }}</div>{% elif admin_view %}<div class="empty-state"><p>{{ t("No extracted content is available for this article.") }}</p></div>{% endif %}
   {% if article.attachments %}
-  <h2>附件</h2>
-  <ul>
-    {% for attachment in article.attachments %}
-    <li><a href="/attachments/{{ attachment.id }}">{{ attachment.filename or t("attachment") }}</a></li>
-    {% endfor %}
-  </ul>
+  <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border-default);">
+    <h2 style="font-size: var(--text-md); margin-bottom: 12px;">附件</h2>
+    <ul class="attachment-list">
+      {% for attachment in article.attachments %}
+      <li class="attachment-item">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        <a href="/attachments/{{ attachment.id }}">{{ attachment.filename or t("attachment") }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
   {% endif %}
 </article>
 {% endblock %}

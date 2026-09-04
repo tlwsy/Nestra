@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% set title = t("Edit provider") %}
+{% block content %}
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Edit provider") }}: {{ provider.name }}</h1>
+  </div>
+  <a href="/admin/providers" class="btn btn-secondary" style="text-decoration: none;">{{ t("Cancel") }}</a>
+</div>
+
+<section class="card">
+  <form method="post" action="/admin/providers/{{ provider.id }}" class="stack">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="form-grid">
+      <label>{{ t("Name") }}
+        <input type="text" name="name" value="{{ provider.name }}" required pattern="[a-z0-9][a-z0-9-]{0,62}">
+      </label>
+      <label>{{ t("API type") }}
+        <select name="type">
+          <option value="openai_compatible"{% if provider.type == "openai_compatible" %} selected{% endif %}>OpenAI-Compatible</option>
+          <option value="gemini"{% if provider.type == "gemini" %} selected{% endif %}>Gemini</option>
+          <option value="anthropic"{% if provider.type == "anthropic" %} selected{% endif %}>Anthropic</option>
+        </select>
+      </label>
+      <label>{{ t("Base URL") }}
+        <input type="url" name="base_url" value="{{ provider.base_url or '' }}" placeholder="https://api.example.com/v1">
+        <small>{{ t("For OpenAI-Compatible, a bare domain gets /v1 automatically; end with / or include a path to use it as entered.") }}</small>
+      </label>
+      <label>{{ t("Models") }}
+        <input type="text" name="models" value="{{ provider.models }}" required maxlength="1024">
+        <small>{{ t("Comma-separated; tried in order.") }}</small>
+      </label>
+      <label>{{ t("API key") }}
+        <input type="password" name="api_key" maxlength="4096" autocomplete="new-password">
+        <small>{{ t("Leave blank to keep the current API key.") }}</small>
+      </label>
+      <label>{{ t("Maximum input characters") }}
+        <input type="number" name="max_input_chars" value="{{ provider.max_input_chars }}" min="500" required>
+      </label>
+    </div>
+    <div><button type="submit">{{ t("Save provider") }}</button></div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>{{ t("Delete provider") }}</h2>
+  <p>{{ t("Deleting removes the encrypted API key and provider settings.") }}</p>
+  <form method="post" action="/admin/providers/{{ provider.id }}/delete" class="stack">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <label><input type="checkbox" name="confirm" value="1" required> {{ t("I understand and want to delete this provider.") }}</label>
+    <div><button type="submit" class="danger">{{ t("Delete provider") }}</button></div>
+  </form>
+</section>
+{% endblock %}

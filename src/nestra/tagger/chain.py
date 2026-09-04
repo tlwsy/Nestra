@@ -16,12 +16,13 @@ from ..core.logging import safe_error
 from ..core.models import ArticleText, Tagset
 from ..core.time import from_iso, now_iso
 from ..storage.db import Database
-from ..storage.repositories.providers import web_providers
+from ..storage.repositories.providers import runtime_providers
 from .base import FatalConfigError, OutputInvalidError, QuotaError, TagResult, TransientError
 from .local_onnx import LocalRunner, LocalTagger, OnnxEmbeddingRunner
 from .providers.anthropic import AnthropicTagger
 from .providers.gemini import GeminiTagger
 from .providers.openai_compatible import OpenAICompatibleTagger
+from .summarizer import summarize
 
 Sleep = Callable[[float], Awaitable[Any]]
 
@@ -137,10 +138,60 @@ class TaggerChain:
         raise AllBackendsFailed("所有 LLM provider 和本地兜底均不可用")
 
     async def tag_article(self, article_id: int, article: ArticleText, tagset: Tagset) -> TagResult:
-        """Tag and atomically persist assignments plus EXTRACTED -> TAGGED."""
+        """Summarize when enabled, then tag and persist the result."""
+        await self.summarize_article(article_id, article)
         result = await self.tag(article, tagset)
         self.persist_result(article_id, tagset, result)
         return result
+
+    async def summarize_article(self, article_id: int, article: ArticleText) -> None:
+        setting = self.db.query_one(
+            "SELECT s.enabled,s.provider,s.model,a.status,a.summary_backend "
+            "FROM ai_summary_settings s JOIN articles a ON a.id=? WHERE s.id=1",
+            (article_id,),
+        )
+        if setting is None:
+            raise TaggerError(f"文章 {article_id} 不存在")
+        if setting["status"] != "EXTRACTED":
+            raise TaggerError(f"文章 {article_id} 状态不是 EXTRACTED: {setting['status']}")
+        if not setting["enabled"] or setting["summary_backend"]:
+            return
+
+        provider = next(
+            (
+                item
+                for item in self._providers()
+                if item.name == setting["provider"] and setting["model"] in item.models
+            ),
+            None,
+        )
+        if provider is None:
+            raise AllBackendsFailed("配置的总结 provider/model 不可用")
+        if self._cooling_down(provider.name):
+            raise AllBackendsFailed(f"总结 provider {provider.name} 正在冷却")
+
+        self._record_call(provider.name)
+        try:
+            summary = await summarize(article, provider, setting["model"], self._client)
+        except (
+            httpx.HTTPError,
+            FatalConfigError,
+            OutputInvalidError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            self._record_failure(provider.name, exc)
+            raise AllBackendsFailed(
+                f"总结后端 {provider.name}/{setting['model']} 失败: {exc}"
+            ) from exc
+        self._record_success(provider.name)
+        self.db.execute(
+            "UPDATE articles SET summary=?,summary_backend=?,summarized_at=? "
+            "WHERE id=? AND status='EXTRACTED' AND summary_backend IS NULL",
+            (summary, f"{provider.name}:{setting['model']}", now_iso(), article_id),
+        )
 
     def persist_result(self, article_id: int, tagset: Tagset, result: TagResult) -> None:
         with self.db.transaction() as conn:
@@ -191,10 +242,9 @@ class TaggerChain:
             )
 
     def _providers(self) -> list[ProviderConfig]:
-        providers = list(self.config.llm.providers)
-        if self.crypto is not None:
-            providers.extend(web_providers(self.db, self.crypto))
-        return providers
+        if self.crypto is None:
+            return list(self.config.llm.providers)
+        return runtime_providers(self.config.llm.providers, self.db, self.crypto)
 
     def _provider(
         self, provider: ProviderConfig, model: str

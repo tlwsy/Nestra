@@ -18,6 +18,10 @@ services:
       NESTRA__WEB__HOST: 0.0.0.0
       NESTRA__WEB__PORT: "8080"
       PYTHONUNBUFFERED: "1"
+    # 绕过宿主的内网分流 DNS；SSRF 防护会拒绝其为公网域名返回的私网地址。
+    dns:
+      - "223.5.5.5"
+      - "1.1.1.1"
     ports:
       # 只暴露给宿主回环；公网入口必须由 Nginx/Caddy + TLS 提供。
       - "127.0.0.1:8080:8080"

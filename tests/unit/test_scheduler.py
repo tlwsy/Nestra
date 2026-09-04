@@ -66,6 +66,7 @@ async def test_scheduler_registers_single_instance_jobs() -> None:
             "housekeeping",
         }
         assert all(job.max_instances == 1 and job.coalesce for job in jobs)
+        assert next(job for job in jobs if job.id == "crawl").trigger.interval.total_seconds() == 60
         assert scheduler.running
     finally:
         await scheduler.aclose()

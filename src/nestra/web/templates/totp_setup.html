@@ -1,15 +1,40 @@
 {% extends "base.html" %}
 {% set title = t("Enable 2FA") %}
 {% block content %}
-<h1>{{ t("Enable two-factor authentication") }}</h1>
-<p>{{ t("Add this account to your authenticator app, then enter its six-digit code within 10 minutes.") }}</p>
-<p><strong>{{ t("Secret:") }}</strong> <code>{{ secret }}</code></p>
-<p><strong>{{ t("Provisioning URI:") }}</strong> <code>{{ uri }}</code></p>
-<form method="post" action="/settings/totp/enable">
-  <input type="hidden" name="_csrf" value="{{ csrf }}">
-  <input type="hidden" name="setup_token" value="{{ setup_token }}">
-  <label>{{ t("Verification code") }} <input name="code" required inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code"></label>
-  <button>{{ t("Enable 2FA") }}</button>
-</form>
-<p><a href="/settings">{{ t("Cancel") }}</a></p>
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Enable two-factor authentication") }}</h1>
+    <p>{{ t("Add this account to your authenticator app, then enter its six-digit code within 10 minutes.") }}</p>
+  </div>
+</div>
+
+<div class="card" style="max-width: 580px; margin-top: 16px;">
+  <div style="background: var(--bg-surface-subtle); border: 1px solid var(--border-default); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 20px;">
+    <p style="margin: 0 0 10px; font-size: var(--text-sm);">
+      <strong>{{ t("Secret:") }}</strong> <code>{{ secret }}</code>
+    </p>
+    <p style="margin: 0; font-size: var(--text-xs); color: var(--text-muted); word-break: break-all;">
+      <strong>{{ t("Provisioning URI:") }}</strong> <code>{{ uri }}</code>
+    </p>
+  </div>
+
+  {% if error %}
+  <div class="alert alert-danger" style="margin-bottom: 16px;">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <span>{{ error }}</span>
+  </div>
+  {% endif %}
+
+  <form method="post" action="/settings/totp/enable" class="stack">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <input type="hidden" name="setup_token" value="{{ setup_token }}">
+    <label>{{ t("Verification code") }}
+      <input type="text" name="code" required inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" placeholder="123456" style="font-family: var(--font-mono); font-size: 1.1rem; letter-spacing: 0.2em; text-align: center; max-width: 240px;">
+    </label>
+    <div class="actions" style="margin-top: 8px;">
+      <button type="submit">{{ t("Enable 2FA") }}</button>
+      <a href="/settings" class="btn btn-secondary" style="text-decoration: none;">{{ t("Cancel") }}</a>
+    </div>
+  </form>
+</div>
 {% endblock %}

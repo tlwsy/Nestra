@@ -42,9 +42,7 @@ class OpenAICompatibleTagger:
         self, article: ArticleText, tagset: Tagset, *, correction: bool = False
     ) -> TagResult:
         if not self.provider.api_key:
-            raise FatalConfigError(
-                f"provider {self.provider.name} 缺少环境变量 {self.provider.api_key_env}"
-            )
+            raise FatalConfigError(f"provider {self.provider.name} 缺少 API 密钥")
         try:
             response = await self.client.post(
                 f"{self.provider.base_url.rstrip('/')}/chat/completions",

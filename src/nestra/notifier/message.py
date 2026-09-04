@@ -68,6 +68,7 @@ def render_message(
     published_at: datetime | None,
     tags: list[tuple[str, float]],
     content: str,
+    summary: str | None = None,
     attachments: list[MessageAttachment] | None = None,
     timezone: str = "UTC",
     requested_format: str = "markdown",
@@ -86,6 +87,7 @@ def render_message(
         for item in attachments
     )
     full_content = content if include_full_content else ""
+    summary = summary.strip() if summary else ""
 
     if fmt == "html":
         body = (
@@ -93,6 +95,8 @@ def render_message(
             f"<b>来源</b>：{html.escape(site_name)} · {html.escape(date)}<br>"
             f'<b>原文</b>：<a href="{html.escape(url, quote=True)}">{html.escape(url)}</a>'
         )
+        if summary:
+            body += f"<hr><b>AI 总结</b>：<br>{html.escape(summary).replace(chr(10), '<br>')}"
         if attachments:
             body += f"<hr>附件（{len(attachments)}）：<br>{html.escape(attachment_lines)}"
         if full_content:
@@ -100,12 +104,14 @@ def render_message(
     elif fmt == "markdown":
         body = (
             f"**标签**：{tag_text}\n**来源**：{site_name} · {date}\n**原文**：{url}"
+            + (f"\n\n---\n**AI 总结**：\n{summary}" if summary else "")
             + (f"\n\n---\n附件（{len(attachments)}）：\n{attachment_lines}" if attachments else "")
             + (f"\n\n---\n{full_content}" if full_content else "")
         )
     else:
         body = (
             f"标签：{tag_text}\n来源：{site_name} · {date}\n原文：{url}"
+            + (f"\n\nAI 总结：\n{summary}" if summary else "")
             + (f"\n\n附件（{len(attachments)}）：\n{attachment_lines}" if attachments else "")
             + (f"\n\n{full_content}" if full_content else "")
         )

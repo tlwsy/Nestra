@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% set title = t("Articles") %}
 {% block content %}
-<h1>{{ t("Articles") }}</h1>
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Articles") }}</h1>
+    <p>{% if admin_view %}{{ t("All crawled articles, including items not yet tagged or delivered.") }}{% else %}{{ "通过订阅规则抓取并投递的文章记录" if zh else "Delivered articles collected from subscription rules." }}{% endif %}</p>
+  </div>
+</div>
 <form method="get" action="/articles" class="filters">
   <label>{{ t("Site") }}
     <select name="site"><option value="">{{ t("All sites") }}</option>{% for site in sites %}<option value="{{ site.slug }}"{% if site.slug == selected_site %} selected{% endif %}>{{ site.name }}</option>{% endfor %}</select>
@@ -10,9 +15,30 @@
     <select name="tag"><option value="">{{ t("All tags") }}</option>{% for tag in tags %}<option value="{{ tag.slug }}"{% if tag.slug == selected_tag %} selected{% endif %}>{{ tag.name }}</option>{% endfor %}</select>
   </label>
   <label>{{ t("Published since") }} <input type="date" name="since" value="{{ since }}"></label>
-  <button>{{ t("Filter") }}</button>
+  <button type="submit">{{ t("Filter") }}</button>
 </form>
-{% if articles %}<ul class="article-list">
-{% for article in articles %}<li><article><h2><a href="/articles/{{ article.id }}">{{ article.title or t("Untitled article") }}</a></h2><p>{{ article.site }}{% if article.published_at %} · <time>{{ article.published_at }}</time>{% endif %}</p>{% if article.summary %}<p>{{ article.summary }}</p>{% endif %}</article></li>{% endfor %}
-</ul>{% else %}<p>{{ t("No delivered articles.") }}</p>{% endif %}
+{% if articles %}
+<ul class="article-list">
+{% for article in articles %}
+  <li>
+    <article>
+      <h2><a href="/articles/{{ article.id }}">{{ article.title or t("Untitled article") }}</a></h2>
+      <div class="article-meta">
+        <span class="badge badge-neutral">{{ article.site }}</span>
+        {% if admin_view %}<span class="badge {{ 'badge-danger' if article.status == 'FAILED' else 'badge-success' if article.status in ('EXTRACTED', 'TAGGED', 'NOTIFIED') else 'badge-neutral' }}">{{ article.status }}</span>{% endif %}
+        {% if article.published_at %}<span>·</span> <time class="tabular-nums">{{ article.published_at }}</time>{% endif %}
+      </div>
+      {% if article.summary %}<p>{{ article.summary }}</p>{% endif %}
+      {% if admin_view and article.last_error %}<p role="alert" style="color: var(--status-danger-text); font-size: var(--text-xs); overflow-wrap: anywhere;">{{ article.last_error }}</p>{% endif %}
+    </article>
+  </li>
+{% endfor %}
+</ul>
+{% else %}
+<div class="empty-state">
+  <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/></svg>
+  <h3>{{ t("No crawled articles.") if admin_view else t("No delivered articles.") }}</h3>
+  <p>{% if admin_view %}{{ t("Start a crawl from Site management or adjust the filters above.") }}{% else %}{{ "等待爬虫周期抓取或调整上方筛选条件。" if zh else "Waiting for scheduled crawler discovery or adjust your filter parameters." }}{% endif %}</p>
+</div>
+{% endif %}
 {% endblock %}

@@ -1,18 +1,90 @@
 {% extends "base.html" %}
 {% set title = t("Notification targets") %}
 {% block content %}
-<h1>{{ t("Notification targets") }}</h1>
-<section class="card" aria-labelledby="new-target"><h2 id="new-target">{{ t("New target") }}</h2>
-  <form method="post" action="/targets" class="stack"><input type="hidden" name="_csrf" value="{{ csrf }}">
-    <label>{{ t("Name") }} <input name="name" required maxlength="100"></label>
-    <label>{{ t("Apprise URL") }} <input type="password" name="apprise_url" required minlength="4" maxlength="4096" autocomplete="new-password" aria-describedby="target-schemes"></label>
-    <small id="target-schemes">{{ t("Supported fixed cloud services include Telegram, Discord, Slack, WeCom, DingTalk, Feishu, Teams, Opsgenie, PagerDuty, LINE and WhatsApp. Custom-host webhooks, SMTP and ntfy are blocked.") }}</small>
-    <input type="hidden" name="enabled" value="0"><label><input type="checkbox" name="enabled" value="1" checked> {{ t("Enabled") }}</label><button>{{ t("Create target") }}</button>
+<div class="page-header">
+  <div class="page-header-text">
+    <h1>{{ t("Notification targets") }}</h1>
+    <p>{{ "配置并管理 Apprise 云通知推送渠道与安全加密凭据" if zh else "Configure and manage Apprise cloud push channels and encrypted secrets." }}</p>
+  </div>
+</div>
+
+<details class="card" style="margin-bottom: 24px;" open aria-labelledby="new-target">
+  <summary style="cursor: pointer; font-weight: 600; font-size: var(--text-md); list-style: none; display: flex; align-items: center; justify-content: space-between;">
+    <span id="new-target" style="display: flex; align-items: center; gap: 8px;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      {{ t("New target") }}
+    </span>
+    <span style="font-size: var(--text-xs); color: var(--text-muted); font-weight: normal;">{{ "点击收起/展开表单" if zh else "Toggle form" }}</span>
+  </summary>
+  <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+    <form method="post" action="/targets" class="stack">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <div class="form-grid">
+        <label>{{ t("Name") }} <input type="text" name="name" required maxlength="100" placeholder="{{ '例如：运营告警钉钉群' if zh else 'e.g. Ops Alert Discord' }}"></label>
+        <label>{{ t("Apprise URL") }} <input type="password" name="apprise_url" required minlength="4" maxlength="4096" autocomplete="new-password" aria-describedby="target-schemes" placeholder="tgram://... / discord://..."></label>
+      </div>
+      <small id="target-schemes" style="line-height: 1.5; color: var(--text-muted);">{{ t("Supported fixed cloud services include Telegram, Discord, Slack, WeCom, DingTalk, Feishu, Teams, Opsgenie, PagerDuty, LINE and WhatsApp. Custom-host webhooks, SMTP and ntfy are blocked.") }}</small>
+      <div class="options">
+        <input type="hidden" name="enabled" value="0">
+        <label><input type="checkbox" name="enabled" value="1" checked> {{ t("Enabled") }}</label>
+      </div>
+      <div>
+        <button type="submit">{{ t("Create target") }}</button>
+      </div>
+    </form>
+  </div>
+</details>
+
+<div class="page-header" style="margin-top: 32px; border-bottom: none; padding-bottom: 0;">
+  <h2>{{ t("Your targets") }}</h2>
+</div>
+
+{% for target in targets %}
+<section class="card" aria-labelledby="target-{{ target.id }}" style="margin-bottom: 20px;">
+  <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle);">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <h3 id="target-{{ target.id }}" style="margin: 0; font-size: var(--text-base);">{{ target.name }}</h3>
+      {% if target.enabled %}
+        <span class="badge badge-success">{{ t("Enabled") }}</span>
+      {% else %}
+        <span class="badge badge-neutral">{{ t("disabled") }}</span>
+      {% endif %}
+    </div>
+    <div class="actions">
+      <form method="post" action="/targets/{{ target.id }}/test" style="margin: 0;">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <button type="submit" class="btn-secondary" style="font-size: var(--text-xs); padding: 4px 10px;">{{ t("Send test") }}</button>
+      </form>
+      <form method="post" action="/targets/{{ target.id }}/delete" style="margin: 0;">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <button class="danger" style="font-size: var(--text-xs); padding: 4px 10px;">{{ t("Delete target") }}</button>
+      </form>
+    </div>
+  </div>
+  <p style="margin: 4px 0 12px; font-size: var(--text-xs); color: var(--text-muted);">
+    <strong>{{ t("Address:") }}</strong> <code>{{ target.url_fingerprint or t("Hidden") }}</code>
+  </p>
+  <form method="post" action="/targets/{{ target.id }}" class="stack">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="form-grid">
+      <label>{{ t("Name") }} <input type="text" name="name" value="{{ target.name }}" required maxlength="100"></label>
+      <label>{{ t("New Apprise URL") }} <input type="password" name="apprise_url" minlength="4" maxlength="4096" autocomplete="new-password" aria-describedby="url-help-{{ target.id }}"></label>
+    </div>
+    <small id="url-help-{{ target.id }}">{{ t("Leave blank to keep the current URL.") }}</small>
+    <div class="options">
+      <input type="hidden" name="enabled" value="0">
+      <label><input type="checkbox" name="enabled" value="1"{% if target.enabled %} checked{% endif %}> {{ t("Enabled") }}</label>
+    </div>
+    <div>
+      <button type="submit">{{ t("Save target") }}</button>
+    </div>
   </form>
 </section>
-<h2>{{ t("Your targets") }}</h2>
-{% for target in targets %}<section class="card" aria-labelledby="target-{{ target.id }}"><h3 id="target-{{ target.id }}">{{ target.name }}</h3><p><strong>{{ t("Address:") }}</strong> {{ target.url_fingerprint or t("Hidden") }}</p>
-  <form method="post" action="/targets/{{ target.id }}" class="stack"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Name") }} <input name="name" value="{{ target.name }}" required maxlength="100"></label><label>{{ t("New Apprise URL") }} <input type="password" name="apprise_url" minlength="4" maxlength="4096" autocomplete="new-password" aria-describedby="url-help-{{ target.id }}"></label><small id="url-help-{{ target.id }}">{{ t("Leave blank to keep the current URL.") }}</small><input type="hidden" name="enabled" value="0"><label><input type="checkbox" name="enabled" value="1"{% if target.enabled %} checked{% endif %}> {{ t("Enabled") }}</label><button>{{ t("Save target") }}</button></form>
-  <div class="actions"><form method="post" action="/targets/{{ target.id }}/test"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>{{ t("Send test") }}</button></form><form method="post" action="/targets/{{ target.id }}/delete"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="danger">{{ t("Delete target") }}</button></form></div>
-</section>{% else %}<p>{{ t("No notification targets yet.") }}</p>{% endfor %}
+{% else %}
+<div class="empty-state">
+  <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+  <h3>{{ t("No notification targets yet.") }}</h3>
+  <p>{{ "尚未创建推送目标。在上方配置你的 Telegram、Discord、飞书或企业微信 Webhook！" if zh else "No notification targets created yet. Configure Telegram, Discord, Feishu or WeCom webhook above!" }}</p>
+</div>
+{% endfor %}
 {% endblock %}

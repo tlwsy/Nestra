@@ -31,7 +31,7 @@ class AnthropicTagger:
         self, article: ArticleText, tagset: Tagset, *, correction: bool = False
     ) -> TagResult:
         if not (key := self.provider.api_key):
-            raise FatalConfigError(f"provider {self.provider.name} 缺少环境变量")
+            raise FatalConfigError(f"provider {self.provider.name} 缺少 API 密钥")
         messages = build_messages(
             article,
             tagset,

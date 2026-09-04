@@ -26,3 +26,11 @@ def web_providers(db: Database, crypto: Crypto) -> list[ProviderConfig]:
             )
         )
     return providers
+
+
+def runtime_providers(
+    configured: list[ProviderConfig], db: Database, crypto: Crypto
+) -> list[ProviderConfig]:
+    overrides = {provider.name: provider for provider in web_providers(db, crypto)}
+    providers = [overrides.pop(provider.name, provider) for provider in configured]
+    return [*providers, *overrides.values()]

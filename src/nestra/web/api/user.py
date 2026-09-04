@@ -498,8 +498,9 @@ async def articles(request: Request, user: CurrentUser):
     site = request.query_params.get("site")
     tag = request.query_params.get("tag")
     since = request.query_params.get("since")
-    params: list[Any] = [user["id"]]
-    filters = ["s.user_id=?", "d.status='sent'"]
+    admin_view = user["role"] == "admin"
+    params: list[Any] = [] if admin_view else [user["id"]]
+    filters = [] if admin_view else ["s.user_id=?", "d.status='sent'"]
     if site:
         filters.append("si.slug=?")
         params.append(site)
@@ -511,12 +512,17 @@ async def articles(request: Request, user: CurrentUser):
     if since:
         filters.append("a.published_at>=?")
         params.append(since)
+    joins = (
+        "JOIN sites si ON si.id=a.site_id"
+        if admin_view
+        else "JOIN sites si ON si.id=a.site_id JOIN deliveries d ON d.article_id=a.id "
+        "JOIN subscriptions s ON s.id=d.subscription_id"
+    )
+    where = " WHERE " + " AND ".join(filters) if filters else ""
     sql = (
-        "SELECT DISTINCT a.id,a.title,a.summary,a.published_at,si.name AS site FROM articles a "  # noqa: S608 -- fixed clauses only
-        "JOIN sites si ON si.id=a.site_id JOIN deliveries d ON d.article_id=a.id "
-        "JOIN subscriptions s ON s.id=d.subscription_id WHERE "
-        + " AND ".join(filters)
-        + " ORDER BY a.published_at DESC LIMIT 200"
+        "SELECT DISTINCT a.id,a.title,a.summary,a.published_at,a.status,a.last_error,"  # noqa: S608 -- fixed clauses only
+        f"si.name AS site FROM articles a {joins}{where} "
+        "ORDER BY a.published_at DESC,a.id DESC LIMIT 200"
     )
     db = request.app.state.db
     rows = [dict(row) for row in db.query(sql, params)]
@@ -532,6 +538,7 @@ async def articles(request: Request, user: CurrentUser):
             "selected_site": site or "",
             "selected_tag": tag or "",
             "since": since or "",
+            "admin_view": admin_view,
             "user": user,
             "csrf": request.cookies.get(CSRF_COOKIE, ""),
         },
@@ -540,12 +547,18 @@ async def articles(request: Request, user: CurrentUser):
 
 @router.get("/articles/{article_id}")
 async def article(article_id: int, request: Request, user: CurrentUser):
-    row = request.app.state.db.query_one(
-        "SELECT DISTINCT a.*,si.name AS site FROM articles a JOIN sites si ON si.id=a.site_id "
-        "JOIN deliveries d ON d.article_id=a.id JOIN subscriptions s ON s.id=d.subscription_id "
-        "WHERE a.id=? AND s.user_id=? AND d.status='sent'",
-        (article_id, user["id"]),
-    )
+    if user["role"] == "admin":
+        row = request.app.state.db.query_one(
+            "SELECT a.*,si.name AS site FROM articles a JOIN sites si ON si.id=a.site_id WHERE a.id=?",
+            (article_id,),
+        )
+    else:
+        row = request.app.state.db.query_one(
+            "SELECT DISTINCT a.*,si.name AS site FROM articles a JOIN sites si ON si.id=a.site_id "
+            "JOIN deliveries d ON d.article_id=a.id JOIN subscriptions s ON s.id=d.subscription_id "
+            "WHERE a.id=? AND s.user_id=? AND d.status='sent'",
+            (article_id, user["id"]),
+        )
     if row is None:
         raise HTTPException(404)
     item = dict(row)
@@ -563,7 +576,12 @@ async def article(article_id: int, request: Request, user: CurrentUser):
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="article.html",
-        context={"article": item, "user": user, "csrf": request.cookies.get(CSRF_COOKIE, "")},
+        context={
+            "article": item,
+            "admin_view": user["role"] == "admin",
+            "user": user,
+            "csrf": request.cookies.get(CSRF_COOKIE, ""),
+        },
     )
 
 
@@ -602,10 +620,17 @@ async def shared_attachment(attachment_id: int, request: Request, token: str = "
 
 @router.get("/attachments/{attachment_id}")
 async def attachment(attachment_id: int, request: Request, user: CurrentUser):
-    row = request.app.state.db.query_one(
-        "SELECT DISTINCT x.local_path,x.filename,x.mime_type FROM attachments x "
-        "JOIN deliveries d ON d.article_id=x.article_id JOIN subscriptions s ON s.id=d.subscription_id "
-        "WHERE x.id=? AND x.status='downloaded' AND d.status='sent' AND s.user_id=?",
-        (attachment_id, user["id"]),
-    )
+    if user["role"] == "admin":
+        row = request.app.state.db.query_one(
+            "SELECT local_path,filename,mime_type FROM attachments "
+            "WHERE id=? AND status='downloaded'",
+            (attachment_id,),
+        )
+    else:
+        row = request.app.state.db.query_one(
+            "SELECT DISTINCT x.local_path,x.filename,x.mime_type FROM attachments x "
+            "JOIN deliveries d ON d.article_id=x.article_id JOIN subscriptions s ON s.id=d.subscription_id "
+            "WHERE x.id=? AND x.status='downloaded' AND d.status='sent' AND s.user_id=?",
+            (attachment_id, user["id"]),
+        )
     return _attachment_file(request, row)
