@@ -10,11 +10,13 @@ from typing import Any
 import httpx
 
 from ..core.config import ProviderConfig, TaggerConfig
+from ..core.crypto import Crypto
 from ..core.errors import AllBackendsFailed, TaggerError, TagsetNotReady
 from ..core.logging import safe_error
 from ..core.models import ArticleText, Tagset
 from ..core.time import from_iso, now_iso
 from ..storage.db import Database
+from ..storage.repositories.providers import web_providers
 from .base import FatalConfigError, OutputInvalidError, QuotaError, TagResult, TransientError
 from .local_onnx import LocalRunner, LocalTagger, OnnxEmbeddingRunner
 from .providers.anthropic import AnthropicTagger
@@ -32,10 +34,12 @@ class TaggerChain:
         *,
         client: httpx.AsyncClient | None = None,
         local: LocalRunner | None = None,
+        crypto: Crypto | None = None,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
         self.config = config
         self.db = db
+        self.crypto = crypto
         self._client = client or httpx.AsyncClient(
             timeout=config.llm.request_timeout_sec, trust_env=False
         )
@@ -73,7 +77,7 @@ class TaggerChain:
     async def tag(self, article: ArticleText, tagset: Tagset) -> TagResult:
         strategy = self.config.strategy
         if strategy != "local_only":
-            for provider in self.config.llm.providers:
+            for provider in self._providers():
                 if self._cooling_down(provider.name):
                     continue
                 skip_provider = False
@@ -185,6 +189,12 @@ class TaggerChain:
                 "UPDATE articles SET status='TAGGED', tagged_at=?, last_error=NULL WHERE id=?",
                 (created_at, article_id),
             )
+
+    def _providers(self) -> list[ProviderConfig]:
+        providers = list(self.config.llm.providers)
+        if self.crypto is not None:
+            providers.extend(web_providers(self.db, self.crypto))
+        return providers
 
     def _provider(
         self, provider: ProviderConfig, model: str

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% set title = article.title or "Article" %}
+{% set title = article.title or t("Article") %}
 {% block content %}
 <article>
   <h1>{{ article.title }}</h1>
@@ -9,7 +9,7 @@
   <h2>附件</h2>
   <ul>
     {% for attachment in article.attachments %}
-    <li><a href="/attachments/{{ attachment.id }}">{{ attachment.filename or "attachment" }}</a></li>
+    <li><a href="/attachments/{{ attachment.id }}">{{ attachment.filename or t("attachment") }}</a></li>
     {% endfor %}
   </ul>
   {% endif %}

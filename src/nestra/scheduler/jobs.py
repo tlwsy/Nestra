@@ -68,7 +68,7 @@ def build_dependencies(settings: Settings, db: Database) -> JobDependencies:
     return JobDependencies(
         settings=settings,
         db=db,
-        tagger=TaggerChain(settings.tagger, db),
+        tagger=TaggerChain(settings.tagger, db, crypto=crypto),
         matcher=Matcher(
             db,
             timezone=settings.app.timezone,

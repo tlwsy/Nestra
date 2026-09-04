@@ -1,54 +1,9 @@
 {% extends "base.html" %}
-{% set title = "Site picker" %}
+{% set title = t("Site picker") %}
 {% block content %}
-<h1>Site picker</h1>
-<p>Only bounded text samples are shown; external scripts and assets are never embedded.</p>
-{% if selectors %}
-<h2>Selector candidates</h2>
-<form method="get" action="/admin/sites/picker">
-  <input type="hidden" name="task_id" value="{{ task_id }}">
-  {% for selector in selectors %}
-  <label><input type="radio" name="selector" value="{{ loop.index0 }}" {% if request.query_params.get('selector', '0') == loop.index0|string %}checked{% endif %}>
-    <code>{{ selector.item_selector }}</code> — {{ selector.matches }} matches, {{ (selector.confidence * 100)|round|int }}%
-    {% if selector.samples %}<span>Samples: {{ selector.samples|join(' · ') }}</span>{% endif %}
-  </label>
-  {% endfor %}
-  <button>Use candidate</button>
-</form>
-{% endif %}
-{% if candidate and not dryrun_done %}
-<h2>Dry-run selected configuration</h2>
-<form method="post" action="/admin/sites/dryrun">
-  <input type="hidden" name="_csrf" value="{{ csrf }}">
-  {% set config = candidate_data.get('config', {}) %}
-  {% set fields = config.get('fields', {}) %}
-  {% set extract = candidate_data.get('extract', {}) %}
-  <fieldset>
-    <legend>Selector editor</legend>
-    <p>Adjust uncertain selectors, then validate them with a no-save preview.</p>
-    <label>List item <input name="item_selector" value="{{ config.get('item_selector', '') }}"></label>
-    <label>Article link <input name="link_selector" value="{{ fields.get('url', '') }}"></label>
-    <label>List title <input name="title_selector" value="{{ fields.get('title', '') }}"></label>
-    <label>List date <input name="published_at_selector" value="{{ fields.get('published_at', '') }}"></label>
-    <label>Detail content <input name="content_selector" value="{{ extract.get('selectors', {}).get('content', '') }}"></label>
-  </fieldset>
-  <details><summary>Advanced candidate JSON</summary>
-    <label>Candidate JSON <textarea name="candidate" rows="18" required>{{ candidate }}</textarea></label>
-  </details>
-  <label>Tagset group <select name="tagset_group" required>{% for group in groups %}<option value="{{ group.slug }}">{{ group.name }}</option>{% endfor %}</select></label>
-  <button>Run preview</button>
-</form>
-{% elif candidate and dryrun_done %}
-<h2>Confirm</h2>
-<p>The preview succeeded. Confirmation creates the site disabled; enable it from the Sites page.</p>
-<form method="post" action="/admin/sites/confirm">
-  <input type="hidden" name="_csrf" value="{{ csrf }}">
-  <input type="hidden" name="task_id" value="{{ task_id }}">
-  <input type="hidden" name="config_hash" value="{{ config_hash }}">
-  <input type="hidden" name="candidate" value="{{ candidate }}">
-  <button>Create disabled site</button>
-</form>
-{% endif %}
-{% if task_id and not candidate %}<p>Task is {{ summary_status or 'running' }}. Refresh this page for results.</p>{% endif %}
-<iframe title="Sanitized dry-run preview" sandbox srcdoc="{{ preview|e }}"></iframe>
+<h1>{{ t("Site picker") }}</h1><p>{{ t("Only bounded text samples are shown; external scripts and assets are never embedded.") }}</p>
+{% if selectors %}<h2>{{ t("Selector candidates") }}</h2><form method="get" action="/admin/sites/picker"><input type="hidden" name="task_id" value="{{ task_id }}">{% for selector in selectors %}<label><input type="radio" name="selector" value="{{ loop.index0 }}" {% if request.query_params.get('selector', '0') == loop.index0|string %}checked{% endif %}><code>{{ selector.item_selector }}</code> — {{ selector.matches }} {{ t("matches") }}, {{ (selector.confidence * 100)|round|int }}%{% if selector.samples %}<span>{{ t("Samples:") }} {{ selector.samples|join(' · ') }}</span>{% endif %}</label>{% endfor %}<button>{{ t("Use candidate") }}</button></form>{% endif %}
+{% if candidate and not dryrun_done %}<h2>{{ t("Dry-run selected configuration") }}</h2><form method="post" action="/admin/sites/dryrun"><input type="hidden" name="_csrf" value="{{ csrf }}">{% set config = candidate_data.get('config', {}) %}{% set fields = config.get('fields', {}) %}{% set extract = candidate_data.get('extract', {}) %}<fieldset><legend>{{ t("Selector editor") }}</legend><p>{{ t("Adjust uncertain selectors, then validate them with a no-save preview.") }}</p><label>{{ t("List item") }} <input name="item_selector" value="{{ config.get('item_selector', '') }}"></label><label>{{ t("Article link") }} <input name="link_selector" value="{{ fields.get('url', '') }}"></label><label>{{ t("List title") }} <input name="title_selector" value="{{ fields.get('title', '') }}"></label><label>{{ t("List date") }} <input name="published_at_selector" value="{{ fields.get('published_at', '') }}"></label><label>{{ t("Detail content") }} <input name="content_selector" value="{{ extract.get('selectors', {}).get('content', '') }}"></label></fieldset><details><summary>{{ t("Advanced candidate JSON") }}</summary><label>{{ t("Candidate JSON") }} <textarea name="candidate" rows="18" required>{{ candidate }}</textarea></label></details><label>{{ t("Tagset group") }} <select name="tagset_group" required>{% for group in groups %}<option value="{{ group.slug }}">{{ group.name }}</option>{% endfor %}</select></label><button>{{ t("Run preview") }}</button></form>
+{% elif candidate and dryrun_done %}<h2>{{ t("Confirm") }}</h2><p>{{ t("The preview succeeded. Confirmation creates the site disabled; enable it from the Sites page.") }}</p><form method="post" action="/admin/sites/confirm"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="task_id" value="{{ task_id }}"><input type="hidden" name="config_hash" value="{{ config_hash }}"><input type="hidden" name="candidate" value="{{ candidate }}"><button>{{ t("Create disabled site") }}</button></form>{% endif %}
+{% if task_id and not candidate %}<p>{{ t("Task is") }} {{ t(summary_status or 'running') }}. {{ t("Refresh this page for results.") }}</p>{% endif %}<iframe title="{{ t('Sanitized dry-run preview') }}" sandbox srcdoc="{{ preview|e }}"></iframe>
 {% endblock %}

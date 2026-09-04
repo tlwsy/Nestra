@@ -21,8 +21,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import ValidationError
 
-from nestra.core.config import SiteConfig
-from nestra.core.crypto import hash_password, new_token
+from nestra.core.config import ProviderConfig, SiteConfig
+from nestra.core.crypto import Crypto, hash_password, new_token
 from nestra.core.logging import get_logger, safe_error
 from nestra.core.time import now_iso
 from nestra.crawler.fetcher import Fetcher
@@ -32,12 +32,13 @@ from nestra.onboarding.dryrun import DryRunLimits, preview_site
 from nestra.onboarding.probe import ProbeLimits, probe_site
 from nestra.onboarding.ssrf import resolve_url
 from nestra.storage.files import attachment_path
+from nestra.storage.repositories.providers import web_providers
 from nestra.storage.repositories.sites import get_site
 from nestra.tagger.bootstrap import BootstrapOptions, NativeLLMInducer, bootstrap_tagset
 from nestra.tagger.bootstrap.freeze import freeze_tagset
 
 from ..deps import AdminUser, flag, integer, request_data, wants_json, write_guard
-from ..security import CSRF_COOKIE, audit, validate_password, validate_username
+from ..security import ADVANCED_COOKIE, CSRF_COOKIE, audit, validate_password, validate_username
 
 router = APIRouter(prefix="/admin")
 log = get_logger(__name__)
@@ -60,6 +61,7 @@ def _page(
             "rows": rows,
             "user": user,
             "csrf": request.cookies.get(CSRF_COOKIE, ""),
+            "advanced": request.cookies.get(ADVANCED_COOKIE) == "1",
             **context,
         },
     )
@@ -890,7 +892,11 @@ async def _run_tagset_build(app, task_id: str, options: BootstrapOptions) -> Non
     try:
         timeout = httpx.Timeout(app.state.settings.tagger.llm.request_timeout_sec)
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            inducer = NativeLLMInducer(app.state.settings.tagger.llm.providers, client)
+            providers = [
+                *app.state.settings.tagger.llm.providers,
+                *web_providers(app.state.db, Crypto(app.state.settings.secret_key)),
+            ]
+            inducer = NativeLLMInducer(providers, client)
             result = await bootstrap_tagset(
                 app.state.db,
                 app.state.settings.tagger.tagset_dir,
@@ -1071,11 +1077,76 @@ async def tagsets(request: Request, user: AdminUser):
 
 @router.get("/providers")
 async def providers(request: Request, user: AdminUser):
-    rows = [
-        dict(row)
-        for row in request.app.state.db.query("SELECT * FROM provider_health ORDER BY provider")
-    ]
-    return rows if wants_json(request) else _page(request, "Providers", rows, user)
+    rows = []
+    for row in request.app.state.db.query(
+        "SELECT p.id,p.name,p.type,p.base_url,p.models_json,p.max_input_chars,p.created_at,"
+        "h.consecutive_failures,h.cooldown_until,h.last_error,h.total_calls,h.total_failures "
+        "FROM llm_providers p LEFT JOIN provider_health h ON h.provider=p.name ORDER BY p.id"
+    ):
+        item = dict(row)
+        item["models"] = json.loads(item.pop("models_json"))
+        rows.append(item)
+    return (
+        rows
+        if wants_json(request)
+        else _page(request, "Providers", rows, user, template="admin_providers.html")
+    )
+
+
+@router.post("/providers")
+async def create_provider(request: Request, user: AdminUser):
+    data = await request_data(request)
+    write_guard(request, data, user)
+    models = [part.strip() for part in str(data.get("models", "")).split(",") if part.strip()]
+    key = data.get("api_key")
+    if not isinstance(key, str) or not 1 <= len(key) <= 4096 or any(ord(char) < 32 for char in key):
+        raise HTTPException(400, "invalid API key")
+    if not models or any(len(model) > 256 for model in models):
+        raise HTTPException(400, "invalid models")
+    try:
+        provider = ProviderConfig(
+            name=str(data.get("name", "")).strip(),
+            type=str(data.get("type", "")),
+            base_url=str(data.get("base_url", "")).strip() or None,
+            models=models,
+            max_input_chars=data.get("max_input_chars", 8000),
+            api_key_value=key,
+        )
+    except ValidationError as exc:
+        raise HTTPException(400, "invalid provider configuration") from exc
+    if provider.name in {item.name for item in request.app.state.settings.tagger.llm.providers}:
+        raise HTTPException(409, "provider name is already used by configuration")
+    try:
+        cursor = request.app.state.db.execute(
+            "INSERT INTO llm_providers "
+            "(name,type,base_url,models_json,max_input_chars,api_key_enc,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (
+                provider.name,
+                provider.type,
+                provider.base_url,
+                json.dumps(provider.models),
+                provider.max_input_chars,
+                request.app.state.crypto.encrypt(key),
+                now_iso(),
+                now_iso(),
+            ),
+        )
+    except Exception as exc:
+        raise HTTPException(409, "provider name already exists") from exc
+    audit(
+        request.app.state.db,
+        "admin.provider_created",
+        request=request,
+        user_id=user["id"],
+        target_type="provider",
+        target_id=cursor.lastrowid,
+    )
+    return (
+        {"id": cursor.lastrowid, "name": provider.name}
+        if wants_json(request)
+        else RedirectResponse("/admin/providers", 303)
+    )
 
 
 @router.get("/system")

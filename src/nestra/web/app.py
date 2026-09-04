@@ -31,6 +31,7 @@ from nestra.tagger.tagset import load_tagset
 from .api.admin import router as admin_router
 from .api.auth import router as auth_router
 from .api.user import router as user_router
+from .i18n import translate
 from .middleware import RequestBodyLimitMiddleware
 from .security import RateLimiter, client_ip, request_is_https, validate_password
 
@@ -167,6 +168,7 @@ def create_app(config_path: Path | str | None = None, *, strict_config: bool = T
     )
     application.add_middleware(RequestBodyLimitMiddleware)
     application.state.templates = Jinja2Templates(directory=WEB_DIR / "templates")
+    application.state.templates.env.globals["t"] = translate
     application.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
     @application.middleware("http")

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% set title = t("Providers") %}
+{% block content %}
+<h1>{{ t("Providers") }}</h1>
+<nav aria-label="{{ t('Admin') }}"><a href="/admin/users">{{ t("Users") }}</a> · <a href="/admin/sites">{{ t("Sites") }}</a> · <a href="/admin/tagset">{{ t("Tagsets") }}</a>{% if advanced %} · <a href="/admin/system">{{ t("System") }}</a>{% endif %} · <a href="/admin/audit">{{ t("Audit") }}</a></nav>
+<section class="card"><h2>{{ t("Add provider") }}</h2><form method="post" action="/admin/providers" class="stack"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Name") }} <input name="name" required pattern="[a-z0-9][a-z0-9-]{0,62}" placeholder="openrouter"></label><label>{{ t("API type") }} <select name="type"><option value="openai_compatible">OpenAI-compatible</option><option value="gemini">Gemini</option><option value="anthropic">Anthropic</option></select></label><label>{{ t("Base URL") }} <input type="url" name="base_url" placeholder="https://api.example.com/v1"><small>{{ t("Required for OpenAI-compatible; optional for Gemini and Anthropic.") }}</small></label><label>{{ t("Models") }} <input name="models" required maxlength="1024" placeholder="gpt-4o-mini"><small>{{ t("Comma-separated; tried in order.") }}</small></label><label>{{ t("API key") }} <input type="password" name="api_key" required maxlength="4096" autocomplete="new-password"></label><label>{{ t("Maximum input characters") }} <input type="number" name="max_input_chars" value="8000" min="500" required></label><button>{{ t("Add provider") }}</button></form></section>
+<h2>{{ t("Added providers") }}</h2>
+{% for row in rows %}<section class="card"><h3>{{ row.name }}</h3><p>{{ row.type }} · {{ row.models | join(', ') }}</p>{% if row.base_url %}<p>{{ row.base_url }}</p>{% endif %}<p>{{ t("Calls") }}: {{ row.total_calls or 0 }} · {{ t("Failures") }}: {{ row.total_failures or 0 }}</p>{% if row.last_error %}<p>{{ t("Last error") }}: {{ row.last_error }}</p>{% endif %}</section>
+{% else %}<p>{{ t("No providers added yet.") }}</p>{% endfor %}
+{% endblock %}

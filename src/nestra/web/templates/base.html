@@ -1,5 +1,6 @@
+{% set zh = request.cookies.get('nestra_locale') == 'zh' %}
 <!doctype html>
-<html lang="en">
+<html lang="{{ 'zh-CN' if zh else 'en' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -7,17 +8,17 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<a class="skip-link" href="#content">Skip to content</a>
+<a class="skip-link" href="#content">{{ '跳到正文' if zh else 'Skip to content' }}</a>
 <header>
   <a class="brand" href="/">Nestra</a>
   {% if user %}
   <nav aria-label="Main navigation">
-    <a href="/subscriptions">Subscriptions</a>
-    <a href="/targets">Targets</a>
-    <a href="/articles">Articles</a>
-    <a href="/settings">Settings</a>
-    {% if user.role == "admin" %}<a href="/admin/users">Admin</a>{% endif %}
-    <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>Log out</button></form>
+    <a href="/subscriptions">{{ '订阅' if zh else 'Subscriptions' }}</a>
+    <a href="/targets">{{ '推送目标' if zh else 'Targets' }}</a>
+    <a href="/articles">{{ '文章' if zh else 'Articles' }}</a>
+    <a href="/settings">{{ '设置' if zh else 'Settings' }}</a>
+    {% if user.role == "admin" %}<a href="/admin/users">{{ '管理' if zh else 'Admin' }}</a>{% endif %}
+    <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>{{ '退出登录' if zh else 'Log out' }}</button></form>
   </nav>
   {% endif %}
 </header>

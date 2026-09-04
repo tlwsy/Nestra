@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% set title = "Recovery codes" %}
+{% set title = t("Recovery codes") %}
 {% block content %}
-<h1>Two-factor authentication enabled</h1>
-<p>Save these one-time recovery codes now. They will not be shown again.</p>
+<h1>{{ t("Two-factor authentication enabled") }}</h1>
+<p>{{ t("Save these one-time recovery codes now. They will not be shown again.") }}</p>
 <ul>{% for code in recovery_codes %}<li><code>{{ code }}</code></li>{% endfor %}</ul>
-<p><a href="/settings">Return to settings</a></p>
+<p><a href="/settings">{{ t("Return to settings") }}</a></p>
 {% endblock %}

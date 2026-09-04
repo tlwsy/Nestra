@@ -22,6 +22,8 @@ from nestra.core.time import now, to_iso
 
 SESSION_COOKIE = "nestra_session"
 CSRF_COOKIE = "nestra_csrf"
+LOCALE_COOKIE = "nestra_locale"
+ADVANCED_COOKIE = "nestra_advanced"
 PASSWORD_MIN_LENGTH = 12
 _MAX_RATE_LIMIT_KEYS = 10_000
 _WEAK = {

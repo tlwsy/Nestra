@@ -125,9 +125,61 @@ async def test_admin_management_pages_render(web_ui) -> None:
         ("/admin/sites", "Add a site"),
         ("/admin/sites/new", "Start probe"),
         ("/admin/tagset", "Tagsets"),
+        ("/admin/providers", "Add provider"),
     ):
         response = await client.get(path)
         assert response.status_code == 200 and text in response.text
+
+
+async def test_settings_controls_language_and_advanced_menu(web_ui) -> None:
+    _app, client, csrf = web_ui
+    assert 'href="/admin/system"' not in (await client.get("/admin/users")).text
+    language = await client.post("/settings/language", data={"_csrf": csrf, "locale": "zh"})
+    assert language.status_code == 303
+    assert "界面语言" in (await client.get("/settings")).text
+    advanced = await client.post("/settings/advanced", data={"_csrf": csrf, "enabled": "1"})
+    assert advanced.status_code == 303
+    assert 'href="/admin/system"' in (await client.get("/admin/users")).text
+    assert (await client.get("/admin/system")).status_code == 200
+    for path, text in (
+        ("/", "仪表盘"),
+        ("/subscriptions", "订阅"),
+        ("/targets", "通知目标"),
+        ("/articles", "文章"),
+        ("/admin/users", "用户"),
+        ("/admin/sites", "站点"),
+        ("/admin/tagset", "标签集"),
+        ("/admin/providers", "模型提供商"),
+    ):
+        response = await client.get(path)
+        assert response.status_code == 200 and text in response.text
+
+
+async def test_admin_can_add_encrypted_web_provider(web_ui) -> None:
+    app, client, csrf = web_ui
+    key = "web-provider-secret"
+    response = await client.post(
+        "/admin/providers?format=json",
+        json={
+            "name": "web-provider",
+            "type": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "models": "model-a, model-b",
+            "api_key": key,
+            "max_input_chars": 8000,
+        },
+        headers={"x-csrf-token": csrf},
+    )
+    assert response.status_code == 200 and key not in response.text
+    row = app.state.db.query_one("SELECT api_key_enc FROM llm_providers WHERE name='web-provider'")
+    assert row and key.encode() not in bytes(row["api_key_enc"])
+    from nestra.scheduler.jobs import build_dependencies
+
+    dependencies = build_dependencies(app.state.settings, app.state.db)
+    try:
+        assert [provider.name for provider in dependencies.tagger._providers()] == ["web-provider"]
+    finally:
+        await dependencies.aclose()
 
 
 async def test_selector_editor_overrides_candidate() -> None:

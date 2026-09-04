@@ -1,32 +1,18 @@
 {% extends "base.html" %}
-{% set title = "Settings" %}
+{% set title = t("Settings") %}
 {% block content %}
-<h1>Settings</h1>
-<h2>Change password</h2>
-<form method="post" action="/settings/password">
-  <input type="hidden" name="_csrf" value="{{ csrf }}">
-  <label>Current password <input type="password" name="old_password" required autocomplete="current-password"></label>
-  <label>New password <input type="password" name="new_password" required minlength="12" maxlength="1024" autocomplete="new-password"></label>
-  <button>Change password</button>
-</form>
-<h2>Two-factor authentication</h2>
-{% if totp_enabled %}
-<p>Two-factor authentication is enabled.</p>
-<form method="post" action="/settings/totp/disable">
-  <input type="hidden" name="_csrf" value="{{ csrf }}">
-  <label>Current password <input type="password" name="password" required autocomplete="current-password"></label>
-  <label>2FA or recovery code <input name="code" required autocomplete="one-time-code"></label>
-  <button class="danger">Disable 2FA</button>
-</form>
-{% else %}
-<form method="post" action="/settings/totp/start">
-  <input type="hidden" name="_csrf" value="{{ csrf }}">
-  <button>Set up 2FA</button>
-</form>
+<h1>{{ t("Settings") }}</h1>
+<h2>{{ t("Language") }}</h2>
+<form method="post" action="/settings/language"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Interface language") }} <select name="locale"><option value="en"{% if locale != 'zh' %} selected{% endif %}>English</option><option value="zh"{% if locale == 'zh' %} selected{% endif %}>中文</option></select></label><button>{{ t("Save language") }}</button></form>
+{% if user.role == 'admin' %}
+<h2>{{ t("Advanced mode") }}</h2>
+<form method="post" action="/settings/advanced"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="enabled" value="0"><label><input type="checkbox" name="enabled" value="1"{% if advanced %} checked{% endif %}> {{ t("Show the system-monitoring menu") }}</label><button>{{ t("Save") }}</button></form>
 {% endif %}
-<h2>Active sessions</h2>
-<ul>{% for session in sessions %}<li>{{ session.created_at }} · {{ session.created_ip }} · {{ session.user_agent }}</li>{% endfor %}</ul>
-<form method="post" action="/settings/sessions/revoke">
-  <input type="hidden" name="_csrf" value="{{ csrf }}"><button>Log out other sessions</button>
-</form>
+<h2>{{ t("Change password") }}</h2>
+<form method="post" action="/settings/password"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Current password") }} <input type="password" name="old_password" required autocomplete="current-password"></label><label>{{ t("New password") }} <input type="password" name="new_password" required minlength="12" maxlength="1024" autocomplete="new-password"></label><button>{{ t("Change password") }}</button></form>
+<h2>{{ t("Two-factor authentication") }}</h2>
+{% if totp_enabled %}<p>{{ t("Two-factor authentication is enabled.") }}</p><form method="post" action="/settings/totp/disable"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Current password") }} <input type="password" name="password" required autocomplete="current-password"></label><label>{{ t("2FA or recovery code") }} <input name="code" required autocomplete="one-time-code"></label><button class="danger">{{ t("Disable 2FA") }}</button></form>
+{% else %}<form method="post" action="/settings/totp/start"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>{{ t("Set up 2FA") }}</button></form>{% endif %}
+<h2>{{ t("Active sessions") }}</h2><ul>{% for session in sessions %}<li>{{ session.created_at }} · {{ session.created_ip }} · {{ session.user_agent }}</li>{% endfor %}</ul>
+<form method="post" action="/settings/sessions/revoke"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>{{ t("Log out other sessions") }}</button></form>
 {% endblock %}

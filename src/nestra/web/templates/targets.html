@@ -1,35 +1,18 @@
 {% extends "base.html" %}
-{% set title = "Notification targets" %}
+{% set title = t("Notification targets") %}
 {% block content %}
-<h1>Notification targets</h1>
-<section class="card" aria-labelledby="new-target">
-  <h2 id="new-target">New target</h2>
-  <form method="post" action="/targets" class="stack">
-    <input type="hidden" name="_csrf" value="{{ csrf }}">
-    <label>Name <input name="name" required maxlength="100"></label>
-    <label>Apprise URL <input type="password" name="apprise_url" required minlength="4" maxlength="4096" autocomplete="new-password" aria-describedby="target-schemes"></label>
-    <small id="target-schemes">Supported fixed cloud services include Telegram, Discord, Slack, WeCom, DingTalk, Feishu, Teams, Opsgenie, PagerDuty, LINE and WhatsApp. Custom-host webhooks, SMTP and ntfy are blocked.</small>
-    <input type="hidden" name="enabled" value="0"><label><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
-    <button>Create target</button>
+<h1>{{ t("Notification targets") }}</h1>
+<section class="card" aria-labelledby="new-target"><h2 id="new-target">{{ t("New target") }}</h2>
+  <form method="post" action="/targets" class="stack"><input type="hidden" name="_csrf" value="{{ csrf }}">
+    <label>{{ t("Name") }} <input name="name" required maxlength="100"></label>
+    <label>{{ t("Apprise URL") }} <input type="password" name="apprise_url" required minlength="4" maxlength="4096" autocomplete="new-password" aria-describedby="target-schemes"></label>
+    <small id="target-schemes">{{ t("Supported fixed cloud services include Telegram, Discord, Slack, WeCom, DingTalk, Feishu, Teams, Opsgenie, PagerDuty, LINE and WhatsApp. Custom-host webhooks, SMTP and ntfy are blocked.") }}</small>
+    <input type="hidden" name="enabled" value="0"><label><input type="checkbox" name="enabled" value="1" checked> {{ t("Enabled") }}</label><button>{{ t("Create target") }}</button>
   </form>
 </section>
-<h2>Your targets</h2>
-{% for target in targets %}
-<section class="card" aria-labelledby="target-{{ target.id }}">
-  <h3 id="target-{{ target.id }}">{{ target.name }}</h3>
-  <p><strong>Address:</strong> {{ target.url_fingerprint or "Hidden" }}</p>
-  <form method="post" action="/targets/{{ target.id }}" class="stack">
-    <input type="hidden" name="_csrf" value="{{ csrf }}">
-    <label>Name <input name="name" value="{{ target.name }}" required maxlength="100"></label>
-    <label>New Apprise URL <input type="password" name="apprise_url" minlength="4" maxlength="4096" autocomplete="new-password" aria-describedby="url-help-{{ target.id }}"></label>
-    <small id="url-help-{{ target.id }}">Leave blank to keep the current URL.</small>
-    <input type="hidden" name="enabled" value="0"><label><input type="checkbox" name="enabled" value="1"{% if target.enabled %} checked{% endif %}> Enabled</label>
-    <button>Save target</button>
-  </form>
-  <div class="actions">
-    <form method="post" action="/targets/{{ target.id }}/test"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>Send test</button></form>
-    <form method="post" action="/targets/{{ target.id }}/delete"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="danger">Delete target</button></form>
-  </div>
-</section>
-{% else %}<p>No notification targets yet.</p>{% endfor %}
+<h2>{{ t("Your targets") }}</h2>
+{% for target in targets %}<section class="card" aria-labelledby="target-{{ target.id }}"><h3 id="target-{{ target.id }}">{{ target.name }}</h3><p><strong>{{ t("Address:") }}</strong> {{ target.url_fingerprint or t("Hidden") }}</p>
+  <form method="post" action="/targets/{{ target.id }}" class="stack"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Name") }} <input name="name" value="{{ target.name }}" required maxlength="100"></label><label>{{ t("New Apprise URL") }} <input type="password" name="apprise_url" minlength="4" maxlength="4096" autocomplete="new-password" aria-describedby="url-help-{{ target.id }}"></label><small id="url-help-{{ target.id }}">{{ t("Leave blank to keep the current URL.") }}</small><input type="hidden" name="enabled" value="0"><label><input type="checkbox" name="enabled" value="1"{% if target.enabled %} checked{% endif %}> {{ t("Enabled") }}</label><button>{{ t("Save target") }}</button></form>
+  <div class="actions"><form method="post" action="/targets/{{ target.id }}/test"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>{{ t("Send test") }}</button></form><form method="post" action="/targets/{{ target.id }}/delete"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="danger">{{ t("Delete target") }}</button></form></div>
+</section>{% else %}<p>{{ t("No notification targets yet.") }}</p>{% endfor %}
 {% endblock %}

@@ -1,18 +1,18 @@
 {% extends "base.html" %}
-{% set title = "Articles" %}
+{% set title = t("Articles") %}
 {% block content %}
-<h1>Articles</h1>
+<h1>{{ t("Articles") }}</h1>
 <form method="get" action="/articles" class="filters">
-  <label>Site
-    <select name="site"><option value="">All sites</option>{% for site in sites %}<option value="{{ site.slug }}"{% if site.slug == selected_site %} selected{% endif %}>{{ site.name }}</option>{% endfor %}</select>
+  <label>{{ t("Site") }}
+    <select name="site"><option value="">{{ t("All sites") }}</option>{% for site in sites %}<option value="{{ site.slug }}"{% if site.slug == selected_site %} selected{% endif %}>{{ site.name }}</option>{% endfor %}</select>
   </label>
-  <label>Tag
-    <select name="tag"><option value="">All tags</option>{% for tag in tags %}<option value="{{ tag.slug }}"{% if tag.slug == selected_tag %} selected{% endif %}>{{ tag.name }}</option>{% endfor %}</select>
+  <label>{{ t("Tag") }}
+    <select name="tag"><option value="">{{ t("All tags") }}</option>{% for tag in tags %}<option value="{{ tag.slug }}"{% if tag.slug == selected_tag %} selected{% endif %}>{{ tag.name }}</option>{% endfor %}</select>
   </label>
-  <label>Published since <input type="date" name="since" value="{{ since }}"></label>
-  <button>Filter</button>
+  <label>{{ t("Published since") }} <input type="date" name="since" value="{{ since }}"></label>
+  <button>{{ t("Filter") }}</button>
 </form>
 {% if articles %}<ul class="article-list">
-{% for article in articles %}<li><article><h2><a href="/articles/{{ article.id }}">{{ article.title or "Untitled article" }}</a></h2><p>{{ article.site }}{% if article.published_at %} · <time>{{ article.published_at }}</time>{% endif %}</p>{% if article.summary %}<p>{{ article.summary }}</p>{% endif %}</article></li>{% endfor %}
-</ul>{% else %}<p>No delivered articles.</p>{% endif %}
+{% for article in articles %}<li><article><h2><a href="/articles/{{ article.id }}">{{ article.title or t("Untitled article") }}</a></h2><p>{{ article.site }}{% if article.published_at %} · <time>{{ article.published_at }}</time>{% endif %}</p>{% if article.summary %}<p>{{ article.summary }}</p>{% endif %}</article></li>{% endfor %}
+</ul>{% else %}<p>{{ t("No delivered articles.") }}</p>{% endif %}
 {% endblock %}

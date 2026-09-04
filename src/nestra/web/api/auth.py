@@ -18,9 +18,11 @@ from nestra.core.crypto import (
 )
 from nestra.core.time import from_iso, now, to_iso
 
-from ..deps import CurrentUser, request_data, require_csrf, wants_json, write_guard
+from ..deps import CurrentUser, flag, request_data, require_csrf, wants_json, write_guard
 from ..security import (
+    ADVANCED_COOKIE,
     CSRF_COOKIE,
+    LOCALE_COOKIE,
     audit,
     clear_auth_cookies,
     csrf_token,
@@ -193,6 +195,7 @@ async def logout(request: Request, user: CurrentUser):
         JSONResponse({"ok": True}) if wants_json(request) else RedirectResponse("/login", 303)
     )
     clear_auth_cookies(response, secure=request.app.state.settings.web.cookie_secure)
+    response.delete_cookie(ADVANCED_COOKIE, path="/", secure=request.app.state.settings.web.cookie_secure)
     return response
 
 
@@ -265,6 +268,8 @@ async def settings(request: Request, user: CurrentUser):
             "username": user["username"],
             "totp_enabled": bool(user["totp_secret"]),
             "sessions": rows,
+            "locale": request.cookies.get(LOCALE_COOKIE, "en"),
+            "advanced": request.cookies.get(ADVANCED_COOKIE) == "1",
         }
     return request.app.state.templates.TemplateResponse(
         request=request,
@@ -274,8 +279,55 @@ async def settings(request: Request, user: CurrentUser):
             "sessions": rows,
             "totp_enabled": bool(user["totp_secret"]),
             "csrf": request.cookies.get(CSRF_COOKIE, ""),
+            "locale": request.cookies.get(LOCALE_COOKIE, "en"),
+            "advanced": request.cookies.get(ADVANCED_COOKIE) == "1",
         },
     )
+
+
+@router.post("/settings/language")
+async def change_language(request: Request, user: CurrentUser):
+    data = await request_data(request)
+    write_guard(request, data, user)
+    locale = str(data.get("locale", ""))
+    if locale not in {"en", "zh"}:
+        raise HTTPException(400, "invalid locale")
+    audit(request.app.state.db, "user.locale_changed", request=request, user_id=user["id"])
+    response = JSONResponse({"locale": locale}) if wants_json(request) else RedirectResponse("/settings", 303)
+    response.set_cookie(
+        LOCALE_COOKIE,
+        locale,
+        secure=request.app.state.settings.web.cookie_secure,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@router.post("/settings/advanced")
+async def change_advanced_mode(request: Request, user: CurrentUser):
+    data = await request_data(request)
+    write_guard(request, data, user)
+    if user["role"] != "admin":
+        raise HTTPException(403, "admin required")
+    enabled = flag(data.get("enabled"))
+    audit(request.app.state.db, "user.advanced_mode_changed", request=request, user_id=user["id"])
+    response = JSONResponse({"advanced": bool(enabled)}) if wants_json(request) else RedirectResponse("/settings", 303)
+    if enabled:
+        response.set_cookie(
+            ADVANCED_COOKIE,
+            "1",
+            secure=request.app.state.settings.web.cookie_secure,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+    else:
+        response.delete_cookie(
+            ADVANCED_COOKIE, path="/", secure=request.app.state.settings.web.cookie_secure
+        )
+    return response
 
 
 @router.post("/settings/password")

@@ -81,7 +81,7 @@ async def test_restart_is_idempotent(tmp_path: Path) -> None:
         app = create_app(path)
         async with app.router.lifespan_context(app), client_for(app) as client:
             assert (await client.get("/healthz")).status_code == 200
-            assert app.state.db.query_one("SELECT COUNT(*) FROM schema_migrations")[0] == 5
+            assert app.state.db.query_one("SELECT COUNT(*) FROM schema_migrations")[0] == 6
 
 
 async def test_tampered_frozen_tagset_aborts_startup(tmp_path: Path) -> None:

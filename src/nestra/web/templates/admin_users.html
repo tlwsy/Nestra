@@ -1,24 +1,11 @@
 {% extends "base.html" %}
-{% set title = "Users" %}
+{% set title = t("Users") %}
 {% block content %}
-<h1>Users</h1>
-<nav aria-label="Admin"><a href="/admin/sites">Sites</a> · <a href="/admin/tagset">Tagsets</a> · <a href="/admin/providers">Providers</a> · <a href="/admin/system">System</a> · <a href="/admin/audit">Audit</a></nav>
-<h2>Create user</h2>
-<p>The response shows the one-time password. The user must replace it at first login.</p>
-<form method="post" action="/admin/users">
-  <input type="hidden" name="_csrf" value="{{ csrf }}">
-  <label>Username <input name="username" required pattern="[a-z0-9_.-]{1,64}"></label>
-  <label>Email <input name="email" type="email"></label>
-  <label>Initial password <input name="password" type="password" minlength="12" autocomplete="new-password"></label>
-  <label>Role <select name="role"><option value="user">User</option><option value="admin">Admin</option></select></label>
-  <button>Create</button>
-</form>
-<h2>Existing users</h2>
-{% for row in rows %}
-<section><h3>{{ row.username }}</h3><p>{{ row.role }} · {{ "active" if row.is_active else "disabled" }}</p>
-  <form method="post" action="/admin/users/{{ row.id }}/status"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="is_active" value="{{ 0 if row.is_active else 1 }}"><button>{{ "Disable" if row.is_active else "Enable" }}</button></form>
-  <form method="post" action="/admin/users/{{ row.id }}/password"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>New temporary password <input type="password" name="password" minlength="12"></label><button>Reset password</button></form>
-  {% if row.totp_enabled %}<form method="post" action="/admin/users/{{ row.id }}/totp/reset"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="danger">Reset 2FA</button></form>{% endif %}
-</section>
-{% else %}<p>No users.</p>{% endfor %}
+<h1>{{ t("Users") }}</h1>
+<nav aria-label="{{ t('Admin') }}"><a href="/admin/sites">{{ t("Sites") }}</a> · <a href="/admin/tagset">{{ t("Tagsets") }}</a> · <a href="/admin/providers">{{ t("Providers") }}</a>{% if advanced %} · <a href="/admin/system">{{ t("System") }}</a>{% endif %} · <a href="/admin/audit">{{ t("Audit") }}</a></nav>
+<h2>{{ t("Create user") }}</h2><p>{{ t("The response shows the one-time password. The user must replace it at first login.") }}</p>
+<form method="post" action="/admin/users"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Username") }} <input name="username" required pattern="[a-z0-9_.-]{1,64}"></label><label>{{ t("Email") }} <input name="email" type="email"></label><label>{{ t("Initial password") }} <input name="password" type="password" minlength="12" autocomplete="new-password"></label><label>{{ t("Role") }} <select name="role"><option value="user">{{ t("User") }}</option><option value="admin">{{ t("Admin") }}</option></select></label><button>{{ t("Create") }}</button></form>
+<h2>{{ t("Existing users") }}</h2>
+{% for row in rows %}<section><h3>{{ row.username }}</h3><p>{{ t(row.role) }} · {{ t("active") if row.is_active else t("disabled") }}</p><form method="post" action="/admin/users/{{ row.id }}/status"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="is_active" value="{{ 0 if row.is_active else 1 }}"><button>{{ t("Disable") if row.is_active else t("Enable") }}</button></form><form method="post" action="/admin/users/{{ row.id }}/password"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("New temporary password") }} <input type="password" name="password" minlength="12"></label><button>{{ t("Reset password") }}</button></form>{% if row.totp_enabled %}<form method="post" action="/admin/users/{{ row.id }}/totp/reset"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="danger">{{ t("Reset 2FA") }}</button></form>{% endif %}</section>
+{% else %}<p>{{ t("No users.") }}</p>{% endfor %}
 {% endblock %}

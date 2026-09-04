@@ -1,16 +1,11 @@
 {% extends "base.html" %}
-{% set title = "Tagsets" %}
+{% set title = t("Tagsets") %}
 {% block content %}
-<h1>Tagsets</h1>
-<nav aria-label="Admin"><a href="/admin/users">Users</a> · <a href="/admin/sites">Sites</a> · <a href="/admin/providers">Providers</a> · <a href="/admin/system">System</a> · <a href="/admin/audit">Audit</a></nav>
-<p>Builds run in the background. Manual review is optional unless the group requires it.</p>
-<h2>Create group</h2>
-<form method="post" action="/admin/tagset/groups"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>Slug <input name="slug" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label><label>Name <input name="name" required></label><label>Description <input name="description"></label><label>Build mode <select name="build_mode"><option value="llm">Direct LLM</option><option value="embedding">Embedding (offline extra required)</option></select></label><button>Create group</button></form>
-{% for row in rows %}
-<section><h2>{{ row.name }}</h2><p><code>{{ row.slug }}</code> · {{ row.status }} · {{ row.tags }} tags · version {{ row.tagset_version or "none" }}</p>
-<form method="post" action="/admin/tagset/build"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="group" value="{{ row.slug }}"><label>Mode <select name="mode"><option value="llm">Direct LLM</option><option value="embedding">Embedding + clustering (offline extra required)</option></select></label><label><input type="checkbox" name="require_manual_review" value="1"> Require review before freezing</label><button>Build</button></form>
-<p><a href="/admin/tagset/{{ row.slug }}/report">Review report</a></p>
-<form method="post" action="/admin/tagset/{{ row.slug }}/freeze"><input type="hidden" name="_csrf" value="{{ csrf }}"><label><input type="checkbox" name="confirm" value="1" required> I reviewed the draft</label><button>Freeze draft</button></form>
-</section>
-{% else %}<p>No tagset groups.</p>{% endfor %}
+<h1>{{ t("Tagsets") }}</h1>
+<nav aria-label="{{ t('Admin') }}"><a href="/admin/users">{{ t("Users") }}</a> · <a href="/admin/sites">{{ t("Sites") }}</a> · <a href="/admin/providers">{{ t("Providers") }}</a>{% if advanced %} · <a href="/admin/system">{{ t("System") }}</a>{% endif %} · <a href="/admin/audit">{{ t("Audit") }}</a></nav>
+<p>{{ t("Builds run in the background. Manual review is optional unless the group requires it.") }}</p>
+<h2>{{ t("Create group") }}</h2>
+<form method="post" action="/admin/tagset/groups"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>{{ t("Slug") }} <input name="slug" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label><label>{{ t("Name") }} <input name="name" required></label><label>{{ t("Description") }} <input name="description"></label><label>{{ t("Build mode") }} <select name="build_mode"><option value="llm">{{ t("Direct LLM") }}</option><option value="embedding">{{ t("Embedding (offline extra required)") }}</option></select></label><button>{{ t("Create group") }}</button></form>
+{% for row in rows %}<section><h2>{{ row.name }}</h2><p><code>{{ row.slug }}</code> · {{ row.status }} · {{ row.tags }} {{ t("Tags") }} · {{ t("version") }} {{ row.tagset_version or t("none") }}</p><form method="post" action="/admin/tagset/build"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="group" value="{{ row.slug }}"><label>{{ t("Mode") }} <select name="mode"><option value="llm">{{ t("Direct LLM") }}</option><option value="embedding">{{ t("Embedding + clustering (offline extra required)") }}</option></select></label><label><input type="checkbox" name="require_manual_review" value="1"> {{ t("Require review before freezing") }}</label><button>{{ t("Build") }}</button></form><p><a href="/admin/tagset/{{ row.slug }}/report">{{ t("Review report") }}</a></p><form method="post" action="/admin/tagset/{{ row.slug }}/freeze"><input type="hidden" name="_csrf" value="{{ csrf }}"><label><input type="checkbox" name="confirm" value="1" required> {{ t("I reviewed the draft") }}</label><button>{{ t("Freeze draft") }}</button></form></section>
+{% else %}<p>{{ t("No tagset groups.") }}</p>{% endfor %}
 {% endblock %}

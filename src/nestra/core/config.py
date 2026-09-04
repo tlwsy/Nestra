@@ -331,7 +331,8 @@ class ProviderConfig(_Base):
     name: Slug
     type: Literal["openai_compatible", "gemini", "anthropic"]
     base_url: str | None = None
-    api_key_env: str
+    api_key_env: str = ""
+    api_key_value: str | None = Field(default=None, exclude=True, repr=False)
     models: list[str] = Field(min_length=1)
     max_input_chars: int = Field(8000, ge=500)
 
@@ -360,7 +361,7 @@ class ProviderConfig(_Base):
     @property
     def api_key(self) -> str | None:
         """运行期读取。值不进模型，避免被日志或配置导出带出去。"""
-        return os.environ.get(self.api_key_env) or None
+        return self.api_key_value or os.environ.get(self.api_key_env) or None
 
 
 class CircuitBreakerConfig(_Base):
