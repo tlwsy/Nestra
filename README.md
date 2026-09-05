@@ -6,12 +6,12 @@
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/framework-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
+[![Docker Image](https://img.shields.io/badge/docker%20image-tlwsy%2Fnestra-2496ED.svg?logo=docker)](https://hub.docker.com/r/tlwsy/nestra)
 [![SQLite WAL](https://img.shields.io/badge/database-SQLite_WAL-003B57.svg)](https://www.sqlite.org/)
-[![Docker Ready](https://img.shields.io/badge/docker-ready-2496ED.svg)](https://www.docker.com/)
 [![Tests](https://img.shields.io/badge/tests-117%20passed-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-*专为低配 VPS（2C2G）量身设计，无 Redis/Celery 负担，单容器/一键脚本极速部署*
+*专为低配 VPS（2C2G）量身设计，无 Redis/Celery 负担，单容器秒级极速部署*
 
 [快速开始](#-普通用户--自建站长极速上手) • [核心特性](#-核心特性) • [开发者指南](#-开发者指南) • [架构设计](#-核心架构与设计哲学) • [常见问题](#-常见问题-faq)
 
@@ -67,31 +67,73 @@
 
 ## 🚀 普通用户 / 自建站长极速上手
 
-### 方式一：Docker 一键部署（推荐）
+### 方式一：Docker Compose 极速部署（最推荐，免源码编译）
 
-一台安装好 Docker 的 Linux 服务器（甚至 1 核 1G / 2 核 2G 的便宜 VPS 即可）：
+无需下载任何仓库源码，直接拉取 Docker Hub 预构建镜像（传输仅 72MB，5 秒完成拉取）：
+
+1. **在服务器上创建目录并新建 `docker-compose.yml`**：
+```yaml
+services:
+  nestra:
+    image: tlwsy/nestra:latest  # 或使用全功能版 tlwsy/nestra:full
+    container_name: nestra
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # 生成方式: openssl rand -base64 32
+      - NESTRA_SECRET_KEY=请替换为你生成的32位以上随机加密密钥
+      # 可选：如果已配置域名并启用 HTTPS 反向代理，请取消注释并填写：
+      # - NESTRA__WEB__BASE_URL=https://nestra.example.com
+      # - NESTRA__WEB__COOKIE_SECURE=true
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config/config.yaml:ro
+```
+
+2. **启动服务**：
+```bash
+# 准备数据目录并后台拉起容器
+mkdir -p data
+docker compose up -d
+```
+
+3. **获取首次管理员注册链接**：
+为了确保公网暴露绝对安全，系统**不存在任何默认密码**。在容器启动后查看日志：
+```bash
+docker compose logs nestra
+```
+日志中会输出一行一次性初始化链接，格式如：
+`Initial administrator setup URL: http://127.0.0.1:8080/setup?token=xxxxxxxxxxxxxxxx`
+
+在浏览器打开该链接，即可完成管理员账号注册与初始登录。
+
+---
+
+### 方式二：一键脚本自动化部署（适合已 Clone 仓库用户）
+
+如果你已经将代码仓库 Clone 到了本地或 VPS：
 
 ```bash
-# 1. 下载并运行一键安装脚本（默认绑定在本机 127.0.0.1:8080）
+# 1. 运行一键安装脚本（默认绑定本机 127.0.0.1:8080，全自动生成随机密钥与目录）
 ./scripts/install.sh
 
 # 若准备绑定独立域名并暴露公网（推荐配合反向代理配置 HTTPS）：
 NESTRA_BASE_URL=https://nestra.example.com ./scripts/install.sh
 ```
 
-脚本将自动创建配置文件目录、初始化 `.env` 密钥并启动 Docker 容器。
+脚本将自动检测 Docker 环境、创建持久化目录、生成强随机密钥并拉起容器，直接在控制台输出管理员注册链接。
 
-#### 首次登录并创建管理员
-为了确保公网暴露绝对安全，系统**不存在任何默认密码**。在容器启动后查看日志：
+---
 
-```bash
-docker compose -f deploy/docker-compose.yml logs nestra
-```
+### 📦 镜像版本说明
 
-日志中会输出一行一次性初始化链接，格式如：
-`Initial administrator setup URL: http://127.0.0.1:8080/setup?token=xxxxxxxxxxxxxxxx`
+| 镜像 Tag | 适用场景 | 传输体积 | 解压占用 | 包含特性 |
+|---|---|:---:|:---:|---|
+| **`tlwsy/nestra:latest`** | **绝大多数用户推荐** | **~72 MB** | **~300 MB** | 核心抓取、正文/附件提取、LLM 降级链、Apprise 推送、完整 Web 界面 |
+| **`tlwsy/nestra:full`** | 需无头渲染 / 本地离线 AI | ~400 MB | ~1.2 GB | 包含 `latest` 全部功能 + Playwright Chromium 动态网页渲染 + ONNX 离线向量模型 |
+| **`ghcr.io/tlwsy/nestra:latest`** | 备用源 (GitHub Packages) | ~72 MB | ~300 MB | 与 Docker Hub 的 `latest` 保持完全同步 |
 
-在浏览器打开该链接，即可完成管理员账号注册与初始登录。
 
 ---
 
@@ -164,11 +206,12 @@ server {
 
 | 操作 | 命令 | 说明 |
 |---|---|---|
-| **查看状态** | `docker compose -f deploy/docker-compose.yml ps` | 查看容器健康状态与运行端口 |
-| **实时日志** | `docker compose -f deploy/docker-compose.yml logs -f nestra` | 查看调度抓取、打标、投递日志 |
-| **安全备份** | `./scripts/backup.sh` | 使用 SQLite 在线备份 API 热备份数据库及附件 |
+| **查看状态** | `docker compose ps` | 查看容器健康状态与运行端口 |
+| **实时日志** | `docker compose logs -f nestra` | 查看调度抓取、打标、投递日志 |
+| **预构建镜像升级** | `docker compose pull && docker compose up -d` | 使用 Docker Hub 预构建镜像时一键无缝升级 |
+| **源码平滑升级** | `./scripts/update.sh` | 使用 Git 仓库部署时：自动备份、拉取代码并重新编译 |
+| **安全热备份** | `./scripts/backup.sh` | 使用 SQLite 在线备份 API 热备份数据库及附件 |
 | **数据恢复** | `./scripts/restore.sh <备份归档.tar.gz>` | 自动停服校验并还原数据，失败自动回滚 |
-| **平滑升级** | `./scripts/update.sh` | 先自动备份，拉取代码，构建新镜像并执行数据库迁移 |
 
 ---
 
