@@ -6,6 +6,7 @@ config/config.yaml
 data/db/*
 data/attachments/*
 data/models/*
+data/backups/*
 !data/**/.gitkeep
 
 # Python
@@ -27,3 +28,6 @@ htmlcov/
 *.swp
 .idea/
 .vscode/
+.agents/
+skills-lock.json
+
