@@ -3,6 +3,7 @@ name = "nestra"
 version = "1.0.0"
 description = "自动抓取、打标、按订阅推送文章与附件"
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.12.4",
